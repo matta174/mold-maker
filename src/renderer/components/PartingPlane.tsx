@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import * as THREE from 'three';
-import type { Axis } from '../App';
+import type { Axis } from '../types';
 
 interface PartingPlaneProps {
   axis: Axis;
@@ -61,16 +61,21 @@ export default function PartingPlane({ axis, offset, boundingBox }: PartingPlane
       {/* Border */}
       <lineLoop>
         <bufferGeometry>
+          {/* R3F's JSX typings for bufferAttribute require `args` — the
+              constructor-tuple form (array, itemSize). Older code passed
+              count/array/itemSize as individual props; newer @types/three
+              + @react-three/fiber enforce the tuple shape. */}
           <bufferAttribute
             attach="attributes-position"
-            count={4}
-            array={new Float32Array([
-              -size / 2, -size / 2, 0,
-              size / 2, -size / 2, 0,
-              size / 2, size / 2, 0,
-              -size / 2, size / 2, 0,
-            ])}
-            itemSize={3}
+            args={[
+              new Float32Array([
+                -size / 2, -size / 2, 0,
+                size / 2, -size / 2, 0,
+                size / 2, size / 2, 0,
+                -size / 2, size / 2, 0,
+              ]),
+              3,
+            ]}
           />
         </bufferGeometry>
         <lineBasicMaterial color="#ff6b35" opacity={0.6} transparent />

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
 interface ModelViewerProps {
@@ -18,6 +18,12 @@ export default function ModelViewer({
 }: ModelViewerProps) {
   const meshRef = useRef<THREE.Mesh>(null);
 
+  // EdgesGeometry is O(triangles) to compute. Previously it was built inline on
+  // every render — now memoized against the source geometry, and disposed when
+  // the source changes or the component unmounts so GPU buffers don't leak.
+  const edges = useMemo(() => new THREE.EdgesGeometry(geometry, 30), [geometry]);
+  useEffect(() => () => edges.dispose(), [edges]);
+
   return (
     <group position={position}>
       <mesh ref={meshRef} geometry={geometry}>
@@ -33,7 +39,7 @@ export default function ModelViewer({
         />
       </mesh>
       {/* Edge highlight */}
-      <lineSegments geometry={new THREE.EdgesGeometry(geometry, 30)}>
+      <lineSegments geometry={edges}>
         <lineBasicMaterial color={color} transparent opacity={0.15} />
       </lineSegments>
     </group>

@@ -13,16 +13,27 @@ function createWindow() {
     title: 'Mold Maker',
     backgroundColor: '#1a1a2e',
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      // Locked down: renderer has no Node access. All privileged work
+      // (file I/O, dialogs) goes through preload.ts → ipcMain handlers.
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      // preload.ts gets compiled to preload.js alongside electron.js.
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadURL('http://localhost:5173');
+  // MAIN_WINDOW_VITE_DEV_SERVER_URL / MAIN_WINDOW_VITE_NAME are injected as
+  // globals by @electron-forge/plugin-vite. In dev the renderer is served by
+  // Vite; in production the bundler writes the built renderer into
+  // .vite/renderer/<name>/index.html.
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+    mainWindow.loadFile(
+      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+    );
   }
 
   mainWindow.on('closed', () => {

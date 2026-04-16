@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CSP: local app, no remote script sources. 'unsafe-eval' is required because
+      manifold-3d compiles WebAssembly at runtime. 'unsafe-inline' on styles
+      because the renderer uses inline style objects. Revisit if we add CSS-in-JS
+      with nonce support or move Manifold into a Worker.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self';" />
     <title>Mold Maker</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }

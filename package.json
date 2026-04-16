@@ -2,12 +2,16 @@
   "name": "mold-maker",
   "version": "1.0.0",
   "description": "",
-  "main": "src/main/electron.ts",
+  "main": ".vite/build/electron.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "electron:dev": "NODE_ENV=development electron src/main/electron.ts",
-    "start": "vite"
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "dev:renderer": "vite --config vite.renderer.config.ts",
+    "build:renderer": "vite build --config vite.renderer.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",
@@ -16,13 +20,17 @@
     "@electron-forge/cli": "^7.11.1",
     "@electron-forge/maker-zip": "^7.11.1",
     "@electron-forge/plugin-vite": "^7.11.1",
+    "@electron-forge/shared-types": "^7.11.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.183.1",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^2.1.0",
     "electron": "^41.2.0",
+    "happy-dom": "^15.11.0",
     "typescript": "^6.0.2",
-    "vite": "^8.0.8"
+    "vite": "^8.0.8",
+    "vitest": "^2.1.0"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
