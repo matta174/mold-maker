@@ -26,6 +26,13 @@ export type WorkerRequest = {
     axis: 'x' | 'y' | 'z';
     /** Normalized split offset along that axis, 0..1. */
     offset: number;
+    /**
+     * Optional tunable overrides. Omitted fields fall back to the
+     * defaults in `../mold/constants`. Kept optional so older callers
+     * (and the test suite) don't break when the protocol gains fields.
+     */
+    wallThicknessRatio?: number;
+    clearanceRatio?: number;
   };
 };
 

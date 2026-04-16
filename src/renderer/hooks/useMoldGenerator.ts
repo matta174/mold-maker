@@ -67,6 +67,7 @@ export function useMoldGenerator() {
       boundingBox: THREE.Box3,
       axis: Axis,
       offset: number,
+      options: { wallThicknessRatio?: number; clearanceRatio?: number } = {},
     ): Promise<{ top: THREE.BufferGeometry; bottom: THREE.BufferGeometry }> => {
       const worker = getWorker();
       const id = ++requestIdRef.current;
@@ -94,6 +95,8 @@ export function useMoldGenerator() {
           bboxMax: [boundingBox.max.x, boundingBox.max.y, boundingBox.max.z],
           axis,
           offset,
+          wallThicknessRatio: options.wallThicknessRatio,
+          clearanceRatio: options.clearanceRatio,
         },
       };
 

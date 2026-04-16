@@ -9,6 +9,7 @@ import { useMoldGenerator, EXPLODE_OFFSET_RATIO } from './hooks/useMoldGenerator
 import { loadFile } from './utils/fileLoader';
 import type { Axis } from './types';
 import { colors, radii, spacing, fontSizes, focusVisibleCss } from './theme';
+import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from './mold/constants';
 
 export type { Axis } from './types';
 
@@ -20,6 +21,8 @@ export type { Axis } from './types';
 export interface GeneratedParams {
   axis: Axis;
   offset: number;
+  wallThicknessRatio: number;
+  clearanceRatio: number;
 }
 
 export interface AppState {
@@ -27,11 +30,15 @@ export interface AppState {
   fileName: string;
   axis: Axis;
   planeOffset: number;
+  /** Wall thickness as a fraction of max bbox extent. User-tunable; defaults to constants. */
+  wallThicknessRatio: number;
+  /** Clearance between mating surfaces as a fraction of wall thickness. User-tunable. */
+  clearanceRatio: number;
   autoDetecting: boolean;
   moldGenerated: boolean;
   topMold: THREE.BufferGeometry | null;
   bottomMold: THREE.BufferGeometry | null;
-  /** Axis+offset used to generate the current mold — null when no mold exists. */
+  /** Params used to generate the current mold — null when no mold exists. */
   generatedParams: GeneratedParams | null;
   explodedView: boolean;
   showOriginal: boolean;
@@ -46,6 +53,8 @@ const initialState: AppState = {
   fileName: '',
   axis: 'z',
   planeOffset: 0.5,
+  wallThicknessRatio: WALL_THICKNESS_RATIO,
+  clearanceRatio: CLEARANCE_RATIO,
   autoDetecting: false,
   moldGenerated: false,
   topMold: null,
@@ -122,7 +131,12 @@ export default function App() {
 
     // Snapshot params at call time so the result we later commit is tagged
     // with the params actually used, even if the user changes them mid-flight.
-    const params: GeneratedParams = { axis: state.axis, offset: state.planeOffset };
+    const params: GeneratedParams = {
+      axis: state.axis,
+      offset: state.planeOffset,
+      wallThicknessRatio: state.wallThicknessRatio,
+      clearanceRatio: state.clearanceRatio,
+    };
 
     try {
       const result = await generateMold(
@@ -130,6 +144,10 @@ export default function App() {
         state.boundingBox,
         params.axis,
         params.offset,
+        {
+          wallThicknessRatio: params.wallThicknessRatio,
+          clearanceRatio: params.clearanceRatio,
+        },
       );
 
       setState(prev => ({
@@ -151,7 +169,12 @@ export default function App() {
           : 'Mold generation failed. The model may not be watertight.',
       }));
     }
-  }, [state.originalGeometry, state.boundingBox, state.axis, state.planeOffset, state.generating, generateMold]);
+  }, [
+    state.originalGeometry, state.boundingBox,
+    state.axis, state.planeOffset,
+    state.wallThicknessRatio, state.clearanceRatio,
+    state.generating, generateMold,
+  ]);
 
   const handleAutoDetect = useCallback(async () => {
     if (!state.originalGeometry) return;
@@ -199,7 +222,9 @@ export default function App() {
   // cut will happen, not the old one).
   const paramsChanged = state.generatedParams !== null && (
     state.generatedParams.axis !== state.axis ||
-    state.generatedParams.offset !== state.planeOffset
+    state.generatedParams.offset !== state.planeOffset ||
+    state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
+    state.generatedParams.clearanceRatio !== state.clearanceRatio
   );
   const showPartingPlaneIndicator =
     !!state.originalGeometry && !!state.boundingBox && (!state.moldGenerated || paramsChanged);
@@ -339,6 +364,15 @@ export default function App() {
           onLoadFile={handleFileLoad}
           onAxisChange={(axis: Axis) => setState(prev => ({ ...prev, axis }))}
           onOffsetChange={(offset: number) => setState(prev => ({ ...prev, planeOffset: offset }))}
+          onWallThicknessChange={(wallThicknessRatio: number) =>
+            setState(prev => ({ ...prev, wallThicknessRatio }))}
+          onClearanceChange={(clearanceRatio: number) =>
+            setState(prev => ({ ...prev, clearanceRatio }))}
+          onResetDimensions={() => setState(prev => ({
+            ...prev,
+            wallThicknessRatio: WALL_THICKNESS_RATIO,
+            clearanceRatio: CLEARANCE_RATIO,
+          }))}
           onGenerate={handleGenerate}
           onAutoDetect={handleAutoDetect}
           onExport={handleExport}

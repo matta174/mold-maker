@@ -24,6 +24,18 @@ import {
 } from './channelPlacement';
 
 /**
+ * Optional overrides for tunables that are otherwise read from ./constants.
+ * Any field left undefined falls back to the module-level constant — so
+ * existing call sites keep working without churn.
+ */
+export interface GenerateMoldOptions {
+  /** Wall thickness as a fraction of max bbox extent. Defaults to WALL_THICKNESS_RATIO. */
+  wallThicknessRatio?: number;
+  /** Clearance between mating surfaces as a fraction of wall thickness. Defaults to CLEARANCE_RATIO. */
+  clearanceRatio?: number;
+}
+
+/**
  * Pure CSG pipeline: given a part geometry and a split plane, produce the
  * two mold halves. No React, no DOM — exists as a standalone function so it
  * can run inside a Web Worker (P1) or be called directly from the main thread.
@@ -40,9 +52,17 @@ export async function generateMold(
   boundingBox: THREE.Box3,
   axis: Axis,
   offset: number, // 0-1 normalized
+  options: GenerateMoldOptions = {},
 ): Promise<{ top: THREE.BufferGeometry; bottom: THREE.BufferGeometry }> {
   const wasm = await getManifold();
   const { Manifold } = wasm;
+
+  // Resolve option overrides against module defaults. `??` (not `||`) so that
+  // an explicit 0 isn't silently replaced with the default — a 0 ratio is
+  // nonsensical for wall thickness but we let downstream CSG fail loudly
+  // rather than hide the bad input here.
+  const wallThicknessRatio = options.wallThicknessRatio ?? WALL_THICKNESS_RATIO;
+  const clearanceRatio = options.clearanceRatio ?? CLEARANCE_RATIO;
 
   // Compute actual split position
   const bboxSize = new THREE.Vector3();
@@ -56,8 +76,8 @@ export async function generateMold(
 
   // Wall thickness and clearance (scale-relative, not absolute)
   const maxExtent = Math.max(bboxSize.x, bboxSize.y, bboxSize.z);
-  const wallThickness = maxExtent * WALL_THICKNESS_RATIO;
-  const clearance = wallThickness * CLEARANCE_RATIO;
+  const wallThickness = maxExtent * wallThicknessRatio;
+  const clearance = wallThickness * clearanceRatio;
 
   // Cutter-plane fudge: prevents zero-size boxes when offset is exactly 0 or 1.
   // Scale-relative so it works for models measured in microns or meters.

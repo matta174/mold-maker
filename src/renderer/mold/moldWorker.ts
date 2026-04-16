@@ -59,6 +59,10 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       bbox,
       req.payload.axis,
       req.payload.offset,
+      {
+        wallThicknessRatio: req.payload.wallThicknessRatio,
+        clearanceRatio: req.payload.clearanceRatio,
+      },
     );
 
     const res: WorkerResponse = {

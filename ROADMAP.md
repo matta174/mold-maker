@@ -21,7 +21,7 @@ The current 1.0 release handles the core two-part mold workflow end to end:
 - Manifold-WASM CSG pipeline running in a Web Worker (responsive UI during generation)
 - Auto-generated registration pins at the four corners, with clearance-fit holes in the mating half
 - Auto-generated tapered sprue and up-to-four air vents at geometric extremities
-- Scale-relative wall thickness (8% of max bounding-box extent) — works for figurines and large parts without tuning
+- Scale-relative wall thickness (3-20%) and clearance (1-15%) as live UI sliders, with regenerate-detection if you adjust them after a build
 - Exploded view and Show-Original toggles
 - STL, OBJ, and 3MF export for each mold half separately
 - Runs in the browser *or* as an Electron desktop app (fully offline)
@@ -31,7 +31,7 @@ What it doesn't do yet is where this roadmap comes in.
 
 ## Now (Active Focus)
 
-The three items we think will move the needle most for first-time users. A full feature-gap analysis is in [`docs/competitive-analysis.md`](./docs/competitive-analysis.md) if you want the longer reasoning.
+The items we think will move the needle most for first-time users. A full feature-gap analysis is in [`docs/competitive-analysis.md`](./docs/competitive-analysis.md) if you want the longer reasoning.
 
 ### 1. Demoldability heatmap overlay 🌿
 
@@ -43,17 +43,7 @@ This is the single feature that makes competitor `mold.actionbox.ca` feel profes
 
 Metaphor: it's a weather radar for your model. Right now the user fires off a generation and hopes it works; the heatmap lets them see the storm coming.
 
-### 2. Expose wall thickness & clearance as user controls 🌱
-
-**Effort:** ~2-3 days · **Status:** Not Started
-
-Right now `WALL_THICKNESS_RATIO = 0.08` and `CLEARANCE_RATIO = 0.05` live in [`src/renderer/mold/constants.ts`](./src/renderer/mold/constants.ts) as hidden tunables. For a 50mm figurine this produces a 4mm wall — perfect. For a 200mm part it produces a 16mm wall that wastes filament; for a 20mm part it produces a 1.6mm wall that cracks on demold.
-
-Expose two controls on the Parting Plane panel: wall thickness (mm) and clearance (mm), with an "Auto" default that uses the current ratio. Flow the values through `generateMold`'s args and include them in the `paramsChanged` comparison so users get the same Regenerate-Mold affordance they have for axis and offset.
-
-Good first issue. Clear scope, well-defined surface area, no new dependencies.
-
-### 3. First-run polish: sample model, drag-and-drop, shortcut cheat sheet 🌱
+### 2. First-run polish: sample model, drag-and-drop, shortcut cheat sheet 🌱
 
 **Effort:** ~3-5 days · **Status:** Not Started
 
@@ -166,3 +156,4 @@ Open an issue describing the problem you're solving (not just the feature you wa
 ## Revision History
 
 - **2026-04-16** — Initial roadmap. Built from the competitive analysis in [`docs/competitive-analysis.md`](./docs/competitive-analysis.md). Now/Next/Later buckets with 12 items total plus explicit "not planned" section.
+- **2026-04-16** — Shipped *Wall thickness & clearance sliders* (was Now #2). Moved to "What Ships Today"; remaining Now items renumbered.

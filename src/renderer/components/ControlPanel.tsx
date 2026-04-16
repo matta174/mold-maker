@@ -1,5 +1,6 @@
 import type { AppState } from '../App';
 import type { Axis } from '../types';
+import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from '../mold/constants';
 import { colors, radii, spacing, fontSizes } from '../theme';
 
 interface ControlPanelProps {
@@ -7,6 +8,9 @@ interface ControlPanelProps {
   onLoadFile: () => void;
   onAxisChange: (axis: Axis) => void;
   onOffsetChange: (offset: number) => void;
+  onWallThicknessChange: (ratio: number) => void;
+  onClearanceChange: (ratio: number) => void;
+  onResetDimensions: () => void;
   onGenerate: () => void;
   onAutoDetect: () => void;
   onExport: (format: 'stl' | 'obj' | '3mf') => void;
@@ -14,6 +18,17 @@ interface ControlPanelProps {
   onToggleOriginal: () => void;
   onStartOver: () => void;
 }
+
+// Slider bounds for the new mold-dimension controls.
+// - Wall thickness: 3% floor because thinner walls risk CSG failures / paper
+//   walls. 20% ceiling because beyond that the mold is wasteful bulk.
+// - Clearance: 1% floor because 0 would fuse the halves. 15% ceiling because
+//   beyond that registration pins wobble too loose to be useful.
+const WALL_THICKNESS_MIN = 0.03;
+const WALL_THICKNESS_MAX = 0.20;
+const CLEARANCE_MIN = 0.01;
+const CLEARANCE_MAX = 0.15;
+const RATIO_STEP = 0.005;
 
 const styles = {
   panel: {
@@ -113,15 +128,44 @@ const styles = {
     fontWeight: 600,
     fontSize: fontSizes.sm,
   },
+  sectionHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm + 2, // match sectionTitle marginBottom
+  },
+  resetLinkBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: colors.textDim,
+    fontSize: fontSizes.xs,
+    cursor: 'pointer',
+    padding: 0,
+    textDecoration: 'underline',
+    fontFamily: 'inherit',
+  },
+  resetLinkBtnDisabled: {
+    opacity: 0.4,
+    cursor: 'default' as const,
+    textDecoration: 'none' as const,
+  },
 };
 
 export default function ControlPanel({
   state, onLoadFile, onAxisChange, onOffsetChange,
+  onWallThicknessChange, onClearanceChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
   onToggleExplode, onToggleOriginal, onStartOver,
 }: ControlPanelProps) {
   const hasModel = !!state.originalGeometry;
   const hasMold = state.moldGenerated;
+
+  // The reset link is only meaningful when something has actually been changed.
+  // Hiding it when already-at-defaults avoids the dead-button confusion where
+  // clicking it does nothing.
+  const dimensionsAtDefaults =
+    state.wallThicknessRatio === WALL_THICKNESS_RATIO &&
+    state.clearanceRatio === CLEARANCE_RATIO;
 
   // Compare current params against the params used for the last successful
   // mold generation. When different, the existing mold is stale and the primary
@@ -130,7 +174,9 @@ export default function ControlPanel({
   // that takes several seconds.
   const paramsChanged = state.generatedParams !== null && (
     state.generatedParams.axis !== state.axis ||
-    state.generatedParams.offset !== state.planeOffset
+    state.generatedParams.offset !== state.planeOffset ||
+    state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
+    state.generatedParams.clearanceRatio !== state.clearanceRatio
   );
 
   const primaryLabel = state.generating
@@ -229,6 +275,64 @@ export default function ControlPanel({
           >
             {primaryLabel}
           </button>
+        </div>
+      )}
+
+      {/* Mold Dimensions — wall thickness and clearance ratios were previously
+          compile-time constants. Exposing them here lets the user dial in fit
+          for tight tolerances (small parts) or strong shells (brittle casts).
+          Changing either invalidates the current mold, same as axis/offset. */}
+      {hasModel && (
+        <div style={styles.section}>
+          <div style={styles.sectionHeaderRow}>
+            <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Mold Dimensions</div>
+            <button
+              type="button"
+              onClick={onResetDimensions}
+              disabled={dimensionsAtDefaults}
+              aria-disabled={dimensionsAtDefaults}
+              style={{
+                ...styles.resetLinkBtn,
+                ...(dimensionsAtDefaults ? styles.resetLinkBtnDisabled : {}),
+              }}
+            >
+              Reset to defaults
+            </button>
+          </div>
+
+          <div style={{ marginBottom: spacing.md }}>
+            <label style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}>
+              Wall Thickness: {Math.round(state.wallThicknessRatio * 1000) / 10}% of model extent
+            </label>
+            <input
+              type="range"
+              min={WALL_THICKNESS_MIN}
+              max={WALL_THICKNESS_MAX}
+              step={RATIO_STEP}
+              value={state.wallThicknessRatio}
+              onChange={e => onWallThicknessChange(parseFloat(e.target.value))}
+              style={styles.slider}
+              aria-label="Wall thickness"
+              aria-valuetext={`${Math.round(state.wallThicknessRatio * 1000) / 10} percent of model extent`}
+            />
+          </div>
+
+          <div>
+            <label style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}>
+              Clearance: {Math.round(state.clearanceRatio * 1000) / 10}% of wall thickness
+            </label>
+            <input
+              type="range"
+              min={CLEARANCE_MIN}
+              max={CLEARANCE_MAX}
+              step={RATIO_STEP}
+              value={state.clearanceRatio}
+              onChange={e => onClearanceChange(parseFloat(e.target.value))}
+              style={styles.slider}
+              aria-label="Clearance between mold halves"
+              aria-valuetext={`${Math.round(state.clearanceRatio * 1000) / 10} percent of wall thickness`}
+            />
+          </div>
         </div>
       )}
 
