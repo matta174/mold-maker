@@ -1,0 +1,35 @@
+{
+  "name": "mold-maker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main/electron.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron:dev": "NODE_ENV=development electron src/main/electron.ts",
+    "start": "vite"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.1",
+    "@electron-forge/maker-zip": "^7.11.1",
+    "@electron-forge/plugin-vite": "^7.11.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.183.1",
+    "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^41.2.0",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.8"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.0",
+    "manifold-3d": "^3.4.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "three": "^0.183.2"
+  }
+}
