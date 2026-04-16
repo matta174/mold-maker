@@ -16,6 +16,7 @@ interface ControlPanelProps {
   onExport: (format: 'stl' | 'obj' | '3mf') => void;
   onToggleExplode: () => void;
   onToggleOriginal: () => void;
+  onToggleHeatmap: () => void;
   onStartOver: () => void;
 }
 
@@ -155,7 +156,7 @@ export default function ControlPanel({
   state, onLoadFile, onAxisChange, onOffsetChange,
   onWallThicknessChange, onClearanceChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
-  onToggleExplode, onToggleOriginal, onStartOver,
+  onToggleExplode, onToggleOriginal, onToggleHeatmap, onStartOver,
 }: ControlPanelProps) {
   const hasModel = !!state.originalGeometry;
   const hasMold = state.moldGenerated;
@@ -246,6 +247,19 @@ export default function ControlPanel({
               style={styles.slider}
               aria-label="Plane position"
               aria-valuetext={`${Math.round(state.planeOffset * 100)} percent`}
+            />
+          </div>
+
+          {/* Draft analysis toggle — surfaces the demoldability heatmap so the
+              user can SEE which faces won't release before running the CSG.
+              Lives in this section on purpose: it answers the "is this axis
+              the right one?" question that axis buttons + slider are posing. */}
+          <div style={{ ...styles.toggleRow, marginBottom: spacing.md }}>
+            <span style={styles.label}>Draft Analysis</span>
+            <ToggleSwitch
+              active={state.showHeatmap}
+              onClick={onToggleHeatmap}
+              label="Demoldability heatmap"
             />
           </div>
 

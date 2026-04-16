@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import ModelViewer from './components/ModelViewer';
 import ControlPanel from './components/ControlPanel';
 import PartingPlane from './components/PartingPlane';
+import HeatmapOverlay from './components/HeatmapOverlay';
 import { useMoldGenerator, EXPLODE_OFFSET_RATIO } from './hooks/useMoldGenerator';
 import { loadFile } from './utils/fileLoader';
 import type { Axis } from './types';
@@ -42,6 +43,8 @@ export interface AppState {
   generatedParams: GeneratedParams | null;
   explodedView: boolean;
   showOriginal: boolean;
+  /** Demoldability heatmap overlay — off by default (diagnostic view). */
+  showHeatmap: boolean;
   generating: boolean;
   boundingBox: THREE.Box3 | null;
   /** User-facing error message for load / generate / auto-detect failures. */
@@ -62,6 +65,7 @@ const initialState: AppState = {
   generatedParams: null,
   explodedView: true,
   showOriginal: true,
+  showHeatmap: false,
   generating: false,
   boundingBox: null,
   errorMessage: null,
@@ -248,7 +252,19 @@ export default function App() {
             <directionalLight position={[10, 10, 5]} intensity={1} />
             <directionalLight position={[-5, -5, -5]} intensity={0.3} />
 
-            {state.originalGeometry && state.showOriginal && (
+            {/* Heatmap takes precedence over the normal original mesh — both
+                at the same coordinates would Z-fight and the flat unlit
+                heatmap colors would fight the lit physical material. */}
+            {state.originalGeometry && state.boundingBox && state.showHeatmap && (
+              <HeatmapOverlay
+                geometry={state.originalGeometry}
+                axis={state.axis}
+                offset={state.planeOffset}
+                boundingBox={state.boundingBox}
+              />
+            )}
+
+            {state.originalGeometry && !state.showHeatmap && state.showOriginal && (
               <ModelViewer geometry={state.originalGeometry} color="#6c9bcf" opacity={state.moldGenerated ? 0.3 : 0.9} />
             )}
 
@@ -320,6 +336,38 @@ export default function App() {
             </div>
           )}
 
+          {/* Heatmap legend — only visible when the heatmap is on. Positioned
+              bottom-right to stay clear of the axis gizmo (bottom-left) and
+              the error banner (top). Small, unobtrusive, explains what the
+              colors mean so users don't have to guess. */}
+          {state.showHeatmap && state.originalGeometry && (
+            <div
+              role="region"
+              aria-label="Heatmap legend"
+              style={{
+                position: 'absolute',
+                bottom: spacing.lg,
+                right: spacing.lg,
+                background: 'rgba(18, 24, 43, 0.85)',
+                border: `1px solid ${colors.borderPanel}`,
+                borderRadius: radii.md,
+                padding: `${spacing.sm}px ${spacing.md}px`,
+                color: colors.textPrimary,
+                fontSize: fontSizes.xs,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: spacing.xs,
+                zIndex: 5,
+                pointerEvents: 'none',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: spacing.xs }}>Demoldability</div>
+              <LegendRow color="#4ade80" label="Draftable" />
+              <LegendRow color="#facc15" label="Marginal" />
+              <LegendRow color="#ef4444" label="Undercut" />
+            </div>
+          )}
+
           {/* Drop zone — real <button> so it's keyboard-focusable and screen
               readers announce it as an interactive element. */}
           {!state.originalGeometry && (
@@ -378,10 +426,27 @@ export default function App() {
           onExport={handleExport}
           onToggleExplode={() => setState(prev => ({ ...prev, explodedView: !prev.explodedView }))}
           onToggleOriginal={() => setState(prev => ({ ...prev, showOriginal: !prev.showOriginal }))}
+          onToggleHeatmap={() => setState(prev => ({ ...prev, showHeatmap: !prev.showHeatmap }))}
           onStartOver={() => setState(initialState)}
         />
       </div>
     </>
+  );
+}
+
+/** Single color-swatch + label row inside the heatmap legend. */
+function LegendRow({ color, label }: { color: string; label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
+      <span
+        aria-hidden="true"
+        style={{
+          width: 12, height: 12, borderRadius: 2, background: color,
+          border: '1px solid rgba(255,255,255,0.2)', flexShrink: 0,
+        }}
+      />
+      <span>{label}</span>
+    </div>
   );
 }
 

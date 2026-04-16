@@ -26,6 +26,7 @@ The current 1.0 release handles the core two-part mold workflow end to end:
 - STL, OBJ, and 3MF export for each mold half separately
 - Runs in the browser *or* as an Electron desktop app (fully offline)
 - Keyboard-accessible UI with ARIA roles on controls
+- Demoldability heatmap overlay — per-face classification (green / yellow / red) lets you see undercuts before running the CSG
 
 What it doesn't do yet is where this roadmap comes in.
 
@@ -33,17 +34,7 @@ What it doesn't do yet is where this roadmap comes in.
 
 The items we think will move the needle most for first-time users. A full feature-gap analysis is in [`docs/competitive-analysis.md`](./docs/competitive-analysis.md) if you want the longer reasoning.
 
-### 1. Demoldability heatmap overlay 🌿
-
-**Effort:** ~5-7 days · **Status:** Not Started
-
-Color-code each face of the loaded model based on the angle between its normal and the selected pull axis. Green = draftable, yellow = marginal, red = undercut. The user can rotate the model or try different parting axes and *see* where a cut will and won't work before running the CSG.
-
-This is the single feature that makes competitor `mold.actionbox.ca` feel professional, and it's much cheaper to build than it looks. You already have vertex normals on every loaded geometry — this is a shader/vertex-color problem, not a CSG problem.
-
-Metaphor: it's a weather radar for your model. Right now the user fires off a generation and hopes it works; the heatmap lets them see the storm coming.
-
-### 2. First-run polish: sample model, drag-and-drop, shortcut cheat sheet 🌱
+### 1. First-run polish: sample model, drag-and-drop, shortcut cheat sheet 🌱
 
 **Effort:** ~3-5 days · **Status:** Not Started
 
@@ -157,3 +148,4 @@ Open an issue describing the problem you're solving (not just the feature you wa
 
 - **2026-04-16** — Initial roadmap. Built from the competitive analysis in [`docs/competitive-analysis.md`](./docs/competitive-analysis.md). Now/Next/Later buckets with 12 items total plus explicit "not planned" section.
 - **2026-04-16** — Shipped *Wall thickness & clearance sliders* (was Now #2). Moved to "What Ships Today"; remaining Now items renumbered.
+- **2026-04-16** — Shipped *Demoldability heatmap overlay* (was Now #1). Per-face green/yellow/red classification with a viewport legend; toggle lives in the Parting Plane section so it's right next to the axis decision it informs. Moved to "What Ships Today"; remaining Now items renumbered.
