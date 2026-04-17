@@ -56,6 +56,24 @@ export interface AppState {
   boundingBox: THREE.Box3 | null;
   /** User-facing error message for load / generate / auto-detect failures. */
   errorMessage: string | null;
+  /**
+   * Uniform display/export scale applied to the part + generated mold. 1.0 = no
+   * scaling (default). Applied non-destructively: the generated mold geometry
+   * is always produced at 1:1, then a Three `<group scale>` wraps the viewport
+   * and a Matrix4 scale is baked into the export. Means the user can try
+   * different scales without re-running CSG (which takes seconds).
+   *
+   * Kept OUT of GeneratedParams deliberately — changing scale does NOT stale
+   * the mold. The mold topology is the same, just visually/exported at a
+   * different size.
+   */
+  scale: number;
+  /**
+   * Currently selected printer preset id, or null if no printer is picked
+   * (default). `null` hides the fit readout entirely — unknown printer means
+   * we can't say anything true about fit.
+   */
+  selectedPrinterId: string | null;
 }
 
 const initialState: AppState = {
@@ -77,6 +95,8 @@ const initialState: AppState = {
   generating: false,
   boundingBox: null,
   errorMessage: null,
+  scale: 1.0,
+  selectedPrinterId: null,
 };
 
 export default function App() {
@@ -331,7 +351,12 @@ export default function App() {
   const handleExport = useCallback(async (format: 'stl' | 'obj' | '3mf') => {
     if (!state.topMold || !state.bottomMold) return;
     try {
-      await exportFiles(state.topMold, state.bottomMold, state.fileName, format);
+      // Pass the current scale. Export bakes it into the geometry so the STL
+      // matches what the user sees in the viewport (where the scale is
+      // applied via a <group scale> wrapper). Scale 1.0 is the no-op path.
+      await exportFiles(
+        state.topMold, state.bottomMold, state.fileName, format, state.scale,
+      );
       // Telemetry: file_exported (success only — we don't event failures here
       // because export failures are extremely rare and the signal we actually
       // want is "which format matters", which is the success count per format).
@@ -343,7 +368,7 @@ export default function App() {
         errorMessage: err instanceof Error ? err.message : 'Export failed.',
       }));
     }
-  }, [state.topMold, state.bottomMold, state.fileName, exportFiles, telemetry]);
+  }, [state.topMold, state.bottomMold, state.fileName, state.scale, exportFiles, telemetry]);
 
   const clearError = useCallback(() => {
     setState(prev => ({ ...prev, errorMessage: null }));
@@ -476,54 +501,63 @@ export default function App() {
             <directionalLight position={[10, 10, 5]} intensity={1} />
             <directionalLight position={[-5, -5, -5]} intensity={0.3} />
 
-            {/* Heatmap takes precedence over the normal original mesh — both
-                at the same coordinates would Z-fight and the flat unlit
-                heatmap colors would fight the lit physical material. */}
-            {state.originalGeometry && state.boundingBox && state.showHeatmap && (
-              <HeatmapOverlay
-                geometry={state.originalGeometry}
-                axis={state.axis}
-                offset={state.planeOffset}
-                boundingBox={state.boundingBox}
-              />
-            )}
+            {/* Print-scale wrapper: everything inside scales together so the
+                viewport visually matches the exported STL size. The grid and
+                gizmo stay OUTSIDE this group on purpose — they're world-space
+                reference (grid squares are "true mm", gizmo is orientation,
+                scaling them would defeat their job). The explode offset is
+                computed from the 1:1 bbox, so it ends up scaled here — which
+                is what we want (exploded halves move apart proportionally). */}
+            <group scale={[state.scale, state.scale, state.scale]}>
+              {/* Heatmap takes precedence over the normal original mesh — both
+                  at the same coordinates would Z-fight and the flat unlit
+                  heatmap colors would fight the lit physical material. */}
+              {state.originalGeometry && state.boundingBox && state.showHeatmap && (
+                <HeatmapOverlay
+                  geometry={state.originalGeometry}
+                  axis={state.axis}
+                  offset={state.planeOffset}
+                  boundingBox={state.boundingBox}
+                />
+              )}
 
-            {state.originalGeometry && !state.showHeatmap && state.showOriginal && (
-              <ModelViewer
-                geometry={state.originalGeometry}
-                color="#6c9bcf"
-                opacity={state.moldGenerated ? 0.3 : 0.9}
-                wireframe={state.wireframe}
-              />
-            )}
+              {state.originalGeometry && !state.showHeatmap && state.showOriginal && (
+                <ModelViewer
+                  geometry={state.originalGeometry}
+                  color="#6c9bcf"
+                  opacity={state.moldGenerated ? 0.3 : 0.9}
+                  wireframe={state.wireframe}
+                />
+              )}
 
-            {state.moldGenerated && state.topMold && (
-              <ModelViewer
-                geometry={state.topMold}
-                color="#5b9bd5"
-                opacity={0.85}
-                position={state.explodedView ? getExplodeOffset(state.axis, 1, state.boundingBox!) : [0, 0, 0]}
-                wireframe={state.wireframe}
-              />
-            )}
+              {state.moldGenerated && state.topMold && (
+                <ModelViewer
+                  geometry={state.topMold}
+                  color="#5b9bd5"
+                  opacity={0.85}
+                  position={state.explodedView ? getExplodeOffset(state.axis, 1, state.boundingBox!) : [0, 0, 0]}
+                  wireframe={state.wireframe}
+                />
+              )}
 
-            {state.moldGenerated && state.bottomMold && (
-              <ModelViewer
-                geometry={state.bottomMold}
-                color="#e07070"
-                opacity={0.85}
-                position={state.explodedView ? getExplodeOffset(state.axis, -1, state.boundingBox!) : [0, 0, 0]}
-                wireframe={state.wireframe}
-              />
-            )}
+              {state.moldGenerated && state.bottomMold && (
+                <ModelViewer
+                  geometry={state.bottomMold}
+                  color="#e07070"
+                  opacity={0.85}
+                  position={state.explodedView ? getExplodeOffset(state.axis, -1, state.boundingBox!) : [0, 0, 0]}
+                  wireframe={state.wireframe}
+                />
+              )}
 
-            {showPartingPlaneIndicator && (
-              <PartingPlane
-                axis={state.axis}
-                offset={state.planeOffset}
-                boundingBox={state.boundingBox!}
-              />
-            )}
+              {showPartingPlaneIndicator && (
+                <PartingPlane
+                  axis={state.axis}
+                  offset={state.planeOffset}
+                  boundingBox={state.boundingBox!}
+                />
+              )}
+            </group>
 
             <OrbitControls makeDefault />
             <gridHelper args={[200, 20, colors.gridMajor, colors.gridMinor]} />
@@ -700,6 +734,12 @@ export default function App() {
           onToggleHeatmap={() => setState(prev => ({ ...prev, showHeatmap: !prev.showHeatmap }))}
           onToggleWireframe={() => setState(prev => ({ ...prev, wireframe: !prev.wireframe }))}
           onStartOver={() => setState(initialState)}
+          onPrinterChange={(selectedPrinterId: string | null) =>
+            setState(prev => ({ ...prev, selectedPrinterId }))}
+          onScaleChange={(scale: number) =>
+            setState(prev => ({ ...prev, scale }))}
+          onResetScale={() =>
+            setState(prev => ({ ...prev, scale: 1.0 }))}
           telemetryConfigured={telemetry.configured}
           telemetryEnabled={telemetry.settings.telemetryEnabled}
           onTelemetryAllow={telemetry.grant}

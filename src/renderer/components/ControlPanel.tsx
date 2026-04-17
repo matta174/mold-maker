@@ -2,6 +2,8 @@ import type { AppState } from '../App';
 import type { Axis } from '../types';
 import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from '../mold/constants';
 import { colors, radii, spacing, fontSizes } from '../theme';
+import { PRINTER_PRESETS, getPresetById } from '../utils/printerPresets';
+import { computeFit, suggestScale, formatFitStatus } from '../utils/printerFit';
 
 interface ControlPanelProps {
   state: AppState;
@@ -19,6 +21,12 @@ interface ControlPanelProps {
   onToggleHeatmap: () => void;
   onToggleWireframe: () => void;
   onStartOver: () => void;
+  /** Printer Fit section — pass null to clear selection. */
+  onPrinterChange: (printerId: string | null) => void;
+  /** Set the uniform display/export scale. 1.0 = no scaling. */
+  onScaleChange: (scale: number) => void;
+  /** Reset scale to 1.0. Used by the "Reset" affordance in Printer Fit. */
+  onResetScale: () => void;
   /** Privacy section: only rendered when the build was compiled with a
    *  telemetry host (VITE_TELEMETRY_HOST). Forks without a host see nothing. */
   telemetryConfigured: boolean;
@@ -167,10 +175,37 @@ export default function ControlPanel({
   onWallThicknessChange, onClearanceChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
   onToggleExplode, onToggleOriginal, onToggleHeatmap, onToggleWireframe, onStartOver,
+  onPrinterChange, onScaleChange, onResetScale,
   telemetryConfigured, telemetryEnabled, onTelemetryAllow, onTelemetryDecline,
 }: ControlPanelProps) {
   const hasModel = !!state.originalGeometry;
   const hasMold = state.moldGenerated;
+
+  // ── Printer Fit derivations ─────────────────────────────────────────
+  // Compute once per render. All pure-fn, cheap — no need to memoize.
+  // We read bbox size from Box3.min/max directly instead of calling
+  // getSize(new Vector3()) because that would require a THREE import here
+  // and this file is otherwise THREE-free (all geometry stuff lives in
+  // App.tsx and hooks).
+  const selectedPrinter = getPresetById(state.selectedPrinterId);
+  const partBbox = state.boundingBox
+    ? {
+        x: state.boundingBox.max.x - state.boundingBox.min.x,
+        y: state.boundingBox.max.y - state.boundingBox.min.y,
+        z: state.boundingBox.max.z - state.boundingBox.min.z,
+      }
+    : null;
+  const fit = (selectedPrinter && partBbox)
+    ? computeFit(partBbox, state.wallThicknessRatio, state.scale, selectedPrinter)
+    : null;
+  const suggestedScale = (selectedPrinter && partBbox && fit && !fit.fits)
+    ? suggestScale(partBbox, state.wallThicknessRatio, selectedPrinter)
+    : null;
+  // "Apply" is only meaningful if (a) a printer is picked, (b) the current
+  // scale differs from the suggestion. Same scale → button is a no-op.
+  const canApplySuggestion =
+    suggestedScale !== null && Math.abs(state.scale - suggestedScale) > 0.001;
+  const scaleDiffersFromDefault = Math.abs(state.scale - 1.0) > 0.001;
 
   // The reset link is only meaningful when something has actually been changed.
   // Hiding it when already-at-defaults avoids the dead-button confusion where
@@ -358,6 +393,146 @@ export default function ControlPanel({
               aria-valuetext={`${Math.round(state.clearanceRatio * 1000) / 10} percent of wall thickness`}
             />
           </div>
+        </div>
+      )}
+
+      {/* Printer Fit — "will the generated mold fit my printer?". Distinct
+          from the competitor pattern that silently rescales your model at
+          export time. We show the fit, show what scale would make it fit,
+          and let the user decide. No stealth rescaling. */}
+      {hasModel && (
+        <div style={styles.section}>
+          <div style={styles.sectionHeaderRow}>
+            <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Printer Fit</div>
+            {scaleDiffersFromDefault && (
+              <button
+                type="button"
+                onClick={onResetScale}
+                style={styles.resetLinkBtn}
+                aria-label="Reset scale to 100%"
+              >
+                Reset scale
+              </button>
+            )}
+          </div>
+
+          <label
+            htmlFor="printer-preset"
+            style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}
+          >
+            Printer
+          </label>
+          <select
+            id="printer-preset"
+            value={state.selectedPrinterId ?? ''}
+            onChange={e => onPrinterChange(e.target.value || null)}
+            style={{
+              width: '100%',
+              padding: `${spacing.sm}px ${spacing.md}px`,
+              borderRadius: radii.sm,
+              border: `1px solid ${colors.borderSubtle}`,
+              background: colors.viewportBg,
+              color: colors.textPrimary,
+              fontSize: fontSizes.sm,
+              fontFamily: 'inherit',
+              marginBottom: spacing.md,
+            }}
+            aria-label="Printer preset"
+          >
+            <option value="">None selected</option>
+            <optgroup label="FDM / Filament">
+              {PRINTER_PRESETS.filter(p => p.category === 'fdm').map(p => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Resin / MSLA">
+              {PRINTER_PRESETS.filter(p => p.category === 'resin').map(p => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </optgroup>
+          </select>
+
+          {/* Status row — only when a printer is picked. Color-codes fit
+              vs overflow so the user can glance at the row and know. */}
+          {selectedPrinter && fit && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                fontSize: fontSizes.sm,
+                color: fit.fits ? '#4ade80' : '#facc15',
+                padding: `${spacing.sm}px ${spacing.md}px`,
+                background: colors.viewportBg,
+                borderRadius: radii.sm,
+                border: `1px solid ${fit.fits ? '#4ade8044' : '#facc1544'}`,
+                marginBottom: spacing.md,
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing.sm,
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: fontSizes.md }}>
+                {fit.fits ? '✓' : '⚠'}
+              </span>
+              <span>{formatFitStatus(fit)}</span>
+            </div>
+          )}
+
+          {/* Suggestion row — only when there's something to suggest.
+              Polite affordance: the button applies the scale, doesn't
+              auto-apply. User stays in control. */}
+          {suggestedScale !== null && canApplySuggestion && (
+            <button
+              type="button"
+              onClick={() => onScaleChange(suggestedScale)}
+              style={{
+                ...styles.button,
+                ...styles.secondaryBtn,
+                marginBottom: spacing.sm,
+              }}
+              aria-label={`Apply suggested scale of ${Math.round(suggestedScale * 100)} percent`}
+            >
+              Apply suggested scale: {Math.round(suggestedScale * 100)}%
+            </button>
+          )}
+
+          {/* Manual scale slider — always visible when a printer is picked,
+              so users can experiment. 10-100% because upscaling past 100%
+              would frequently overflow the printer, and going below 10%
+              produces comically tiny prints. */}
+          {selectedPrinter && (
+            <div>
+              <label style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}>
+                Print Scale: {Math.round(state.scale * 100)}%
+              </label>
+              <input
+                type="range"
+                min={0.1}
+                max={1.0}
+                step={0.01}
+                value={state.scale}
+                onChange={e => onScaleChange(parseFloat(e.target.value))}
+                style={styles.slider}
+                aria-label="Print scale"
+                aria-valuetext={`${Math.round(state.scale * 100)} percent`}
+              />
+            </div>
+          )}
+
+          {/* Help text — tiny, dim. Explains the difference between this
+              feature and the silent-rescale pattern users may have seen
+              elsewhere, so they trust it. */}
+          {!selectedPrinter && (
+            <div style={{
+              fontSize: fontSizes.xs,
+              color: colors.textDim,
+              lineHeight: 1.4,
+              marginTop: spacing.xs,
+            }}>
+              Pick a printer to check fit and see a scale suggestion.
+              Scale is a preview — the exported STL matches what's shown here.
+            </div>
+          )}
         </div>
       )}
 

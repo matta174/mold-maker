@@ -135,42 +135,76 @@ export function useMoldGenerator() {
 
   const autoDetectPlane = useCallback(autoDetectPlaneImpl, []);
 
-  /** Export mold halves to various formats. */
+  /**
+   * Export mold halves to various formats.
+   *
+   * Scale handling: the CSG pipeline always produces 1:1 geometry. If the
+   * user has applied a print-scale (Auto-scale-to-printer feature), we bake
+   * it into a CLONE of each half before serialization so the original
+   * geometry in App state is left untouched (changing scale mid-session
+   * should not mutate the displayed mold). A scale of 1.0 is a common
+   * fast-path and skips the clone entirely.
+   */
   const exportFiles = useCallback(async (
     topGeo: THREE.BufferGeometry,
     bottomGeo: THREE.BufferGeometry,
     fileName: string,
     format: 'stl' | 'obj' | '3mf',
+    scale: number = 1.0,
   ) => {
     const baseName = (fileName.replace(/\.[^.]+$/, '') || 'mold');
 
+    /**
+     * Produce a geometry to export — either the original (at scale 1) or a
+     * scaled clone. Uniform scale only; non-uniform would break wall-thickness
+     * assumptions and produce molds with uneven walls.
+     *
+     * Why clone: applyMatrix4 mutates. We don't want the STL export to
+     * permanently modify the geometry currently rendered in the viewport,
+     * especially because the viewport uses a <group scale> wrapper which
+     * would then stack the scaling and halve the model visually.
+     */
+    const prepareForExport = (geo: THREE.BufferGeometry): THREE.BufferGeometry => {
+      if (scale === 1.0) return geo;
+      const clone = geo.clone();
+      clone.applyMatrix4(new THREE.Matrix4().makeScale(scale, scale, scale));
+      return clone;
+    };
+
     const exportGeometry = async (geo: THREE.BufferGeometry, suffix: string) => {
+      const exportGeo = prepareForExport(geo);
       let data: ArrayBuffer;
 
-      switch (format) {
-        case 'stl':
-          data = exportSTL(geo);
-          break;
-        case 'obj':
-          data = exportOBJ(geo);
-          break;
-        case '3mf':
-          data = await export3MF(geo);
-          break;
-        default:
-          data = exportSTL(geo);
-      }
+      try {
+        switch (format) {
+          case 'stl':
+            data = exportSTL(exportGeo);
+            break;
+          case 'obj':
+            data = exportOBJ(exportGeo);
+            break;
+          case '3mf':
+            data = await export3MF(exportGeo);
+            break;
+          default:
+            data = exportSTL(exportGeo);
+        }
 
-      const blob = new Blob([data], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${baseName}_${suffix}.${format}`;
-      a.click();
-      // Delay revocation: `a.click()` starts the download but Safari/Firefox
-      // variants may not have captured the blob by the time the microtask
-      // returns. 2s is conservative — the URL is cheap to hold.
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${baseName}_${suffix}.${format}`;
+        a.click();
+        // Delay revocation: `a.click()` starts the download but Safari/Firefox
+        // variants may not have captured the blob by the time the microtask
+        // returns. 2s is conservative — the URL is cheap to hold.
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } finally {
+        // Free the scaled clone's GPU buffers (the 1.0 fast-path returns the
+        // original geo which is still owned by the caller — don't dispose it).
+        if (exportGeo !== geo) exportGeo.dispose();
+      }
     };
 
     await exportGeometry(topGeo, 'top');
