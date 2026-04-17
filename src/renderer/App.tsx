@@ -46,6 +46,9 @@ export interface AppState {
   showOriginal: boolean;
   /** Demoldability heatmap overlay — off by default (diagnostic view). */
   showHeatmap: boolean;
+  /** Render loaded model + mold halves as wireframe — off by default. Useful for
+   *  inspecting mesh topology when CSG fails or diagnosing boolean artifacts. */
+  wireframe: boolean;
   generating: boolean;
   boundingBox: THREE.Box3 | null;
   /** User-facing error message for load / generate / auto-detect failures. */
@@ -67,6 +70,7 @@ const initialState: AppState = {
   explodedView: true,
   showOriginal: true,
   showHeatmap: false,
+  wireframe: false,
   generating: false,
   boundingBox: null,
   errorMessage: null,
@@ -341,6 +345,12 @@ export default function App() {
             setState(prev => ({ ...prev, showHeatmap: !prev.showHeatmap }));
           }
           break;
+        case 'w':
+          if (state.originalGeometry) {
+            e.preventDefault();
+            setState(prev => ({ ...prev, wireframe: !prev.wireframe }));
+          }
+          break;
         case 'e':
           if (state.moldGenerated) {
             e.preventDefault();
@@ -415,7 +425,12 @@ export default function App() {
             )}
 
             {state.originalGeometry && !state.showHeatmap && state.showOriginal && (
-              <ModelViewer geometry={state.originalGeometry} color="#6c9bcf" opacity={state.moldGenerated ? 0.3 : 0.9} />
+              <ModelViewer
+                geometry={state.originalGeometry}
+                color="#6c9bcf"
+                opacity={state.moldGenerated ? 0.3 : 0.9}
+                wireframe={state.wireframe}
+              />
             )}
 
             {state.moldGenerated && state.topMold && (
@@ -424,6 +439,7 @@ export default function App() {
                 color="#5b9bd5"
                 opacity={0.85}
                 position={state.explodedView ? getExplodeOffset(state.axis, 1, state.boundingBox!) : [0, 0, 0]}
+                wireframe={state.wireframe}
               />
             )}
 
@@ -433,6 +449,7 @@ export default function App() {
                 color="#e07070"
                 opacity={0.85}
                 position={state.explodedView ? getExplodeOffset(state.axis, -1, state.boundingBox!) : [0, 0, 0]}
+                wireframe={state.wireframe}
               />
             )}
 
@@ -617,6 +634,7 @@ export default function App() {
           onToggleExplode={() => setState(prev => ({ ...prev, explodedView: !prev.explodedView }))}
           onToggleOriginal={() => setState(prev => ({ ...prev, showOriginal: !prev.showOriginal }))}
           onToggleHeatmap={() => setState(prev => ({ ...prev, showHeatmap: !prev.showHeatmap }))}
+          onToggleWireframe={() => setState(prev => ({ ...prev, wireframe: !prev.wireframe }))}
           onStartOver={() => setState(initialState)}
         />
       </div>
@@ -669,6 +687,7 @@ function ShortcutCheatSheet({ onClose }: { onClose: () => void }) {
     ['G', 'Generate mold'],
     ['A', 'Auto-detect parting plane'],
     ['H', 'Toggle demoldability heatmap'],
+    ['W', 'Toggle wireframe'],
     ['E', 'Toggle exploded view'],
     ['X / Y / Z', 'Set parting axis'],
     ['Esc', 'Close this overlay'],

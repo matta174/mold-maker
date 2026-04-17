@@ -28,6 +28,7 @@ The current 1.0 release handles the core two-part mold workflow end to end:
 - Keyboard-accessible UI with ARIA roles on controls
 - Demoldability heatmap overlay — per-face classification (green / yellow / red) lets you see undercuts before running the CSG
 - First-run polish: bundled procedural sample model, drag-and-drop STL/OBJ onto the viewport, keyboard shortcuts with a `?`-triggered cheat-sheet overlay
+- Wireframe toggle in the viewport (`W` shortcut, also in the View panel) — inspect mesh topology on the loaded model *or* generated mold halves
 
 What it doesn't do yet is where this roadmap comes in.
 
@@ -64,12 +65,6 @@ Gotcha: `getRegistrationPinPositions` in [`channelPlacement.ts`](./src/renderer/
 **Effort:** ~4-6 days · **Status:** Not Started
 
 Circular parts (bottles, dials, buttons) get cleaner demolding from a cylindrical mold box. Jason Webb's OpenSCAD script had this in 2012; we should too. Manifold has cylinder primitives already.
-
-### 7. Wireframe toggle in the viewport 🌱
-
-**Effort:** ~1-2 days · **Status:** Not Started
-
-`<ToggleSwitch>` bound to a boolean, passed to the Three.js material as `wireframe: true|false`. Maps cleanly onto the `W` shortcut in item 3. Good weekend issue for someone new to the codebase.
 
 ## Later (On Our Radar)
 
@@ -141,3 +136,4 @@ Open an issue describing the problem you're solving (not just the feature you wa
 - **2026-04-16** — Shipped *Wall thickness & clearance sliders* (was Now #2). Moved to "What Ships Today"; remaining Now items renumbered.
 - **2026-04-16** — Shipped *Demoldability heatmap overlay* (was Now #1). Per-face green/yellow/red classification with a viewport legend; toggle lives in the Parting Plane section so it's right next to the axis decision it informs. Moved to "What Ships Today"; remaining Now items renumbered.
 - **2026-04-16** — Shipped *First-run polish* (was Now #1). Bundled procedural sample mushroom (deliberately designed to hit every heatmap classification), drag-and-drop file loading on the viewport, and keyboard shortcuts (`O` open, `G` generate, `A` auto-detect, `H` heatmap, `E` explode, `X`/`Y`/`Z` axis, `?` help, `Esc` close). Moved to "What Ships Today"; Now bucket is now empty pending the next focus decision.
+- **2026-04-16** — Shipped *Wireframe toggle* (was Next #7, pulled forward as a one-day warm-up). Bound to `W` shortcut, surfaced in a promoted View panel that now appears as soon as a model loads (not only after mold generation). The `wireframe` prop was already plumbed through `ModelViewer` — this wired state, keybind, toggle, and cheat-sheet entry. Moved to "What Ships Today"; Next bucket is now items 4–6 (STEP, Oblique, Mold Box).

@@ -17,6 +17,7 @@ interface ControlPanelProps {
   onToggleExplode: () => void;
   onToggleOriginal: () => void;
   onToggleHeatmap: () => void;
+  onToggleWireframe: () => void;
   onStartOver: () => void;
 }
 
@@ -156,7 +157,7 @@ export default function ControlPanel({
   state, onLoadFile, onAxisChange, onOffsetChange,
   onWallThicknessChange, onClearanceChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
-  onToggleExplode, onToggleOriginal, onToggleHeatmap, onStartOver,
+  onToggleExplode, onToggleOriginal, onToggleHeatmap, onToggleWireframe, onStartOver,
 }: ControlPanelProps) {
   const hasModel = !!state.originalGeometry;
   const hasMold = state.moldGenerated;
@@ -350,18 +351,29 @@ export default function ControlPanel({
         </div>
       )}
 
-      {/* View Options */}
-      {hasMold && (
+      {/* View Options — promoted from hasMold-only to hasModel-and-up because
+          Wireframe is useful on the *loaded* model too (CSG debugging, topology
+          inspection). Exploded/Show Original still require a mold to be
+          meaningful, so they stay nested behind hasMold. */}
+      {hasModel && (
         <div style={styles.section}>
           <div style={styles.sectionTitle}>View</div>
           <div style={styles.toggleRow}>
-            <span style={styles.label}>Exploded View</span>
-            <ToggleSwitch active={state.explodedView} onClick={onToggleExplode} label="Exploded view" />
+            <span style={styles.label}>Wireframe</span>
+            <ToggleSwitch active={state.wireframe} onClick={onToggleWireframe} label="Wireframe view" />
           </div>
-          <div style={styles.toggleRow}>
-            <span style={styles.label}>Show Original</span>
-            <ToggleSwitch active={state.showOriginal} onClick={onToggleOriginal} label="Show original model" />
-          </div>
+          {hasMold && (
+            <>
+              <div style={styles.toggleRow}>
+                <span style={styles.label}>Exploded View</span>
+                <ToggleSwitch active={state.explodedView} onClick={onToggleExplode} label="Exploded view" />
+              </div>
+              <div style={styles.toggleRow}>
+                <span style={styles.label}>Show Original</span>
+                <ToggleSwitch active={state.showOriginal} onClick={onToggleOriginal} label="Show original model" />
+              </div>
+            </>
+          )}
         </div>
       )}
 
