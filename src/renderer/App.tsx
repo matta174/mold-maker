@@ -9,7 +9,7 @@ import HeatmapOverlay from './components/HeatmapOverlay';
 import { useMoldGenerator, EXPLODE_OFFSET_RATIO } from './hooks/useMoldGenerator';
 import { loadFile, parseFile } from './utils/fileLoader';
 import { createSampleModel } from './utils/sampleModel';
-import type { Axis } from './types';
+import type { Axis, MoldBoxShape } from './types';
 import { colors, radii, spacing, fontSizes, focusVisibleCss } from './theme';
 import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from './mold/constants';
 import { useTelemetry } from './services/useTelemetry';
@@ -28,6 +28,9 @@ export interface GeneratedParams {
   offset: number;
   wallThicknessRatio: number;
   clearanceRatio: number;
+  /** Outer shell shape. Included in the staleness check — changing it must
+   *  re-generate the mold, since it changes the CSG output geometry. */
+  moldBoxShape: MoldBoxShape;
 }
 
 export interface AppState {
@@ -39,6 +42,8 @@ export interface AppState {
   wallThicknessRatio: number;
   /** Clearance between mating surfaces as a fraction of wall thickness. User-tunable. */
   clearanceRatio: number;
+  /** Outer shell shape. Defaults to 'rect'. */
+  moldBoxShape: MoldBoxShape;
   autoDetecting: boolean;
   moldGenerated: boolean;
   topMold: THREE.BufferGeometry | null;
@@ -83,6 +88,7 @@ const initialState: AppState = {
   planeOffset: 0.5,
   wallThicknessRatio: WALL_THICKNESS_RATIO,
   clearanceRatio: CLEARANCE_RATIO,
+  moldBoxShape: 'rect',
   autoDetecting: false,
   moldGenerated: false,
   topMold: null,
@@ -255,6 +261,7 @@ export default function App() {
       offset: state.planeOffset,
       wallThicknessRatio: state.wallThicknessRatio,
       clearanceRatio: state.clearanceRatio,
+      moldBoxShape: state.moldBoxShape,
     };
 
     try {
@@ -266,6 +273,7 @@ export default function App() {
         {
           wallThicknessRatio: params.wallThicknessRatio,
           clearanceRatio: params.clearanceRatio,
+          moldBoxShape: params.moldBoxShape,
         },
       );
 
@@ -472,7 +480,8 @@ export default function App() {
     state.generatedParams.axis !== state.axis ||
     state.generatedParams.offset !== state.planeOffset ||
     state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
-    state.generatedParams.clearanceRatio !== state.clearanceRatio
+    state.generatedParams.clearanceRatio !== state.clearanceRatio ||
+    state.generatedParams.moldBoxShape !== state.moldBoxShape
   );
   const showPartingPlaneIndicator =
     !!state.originalGeometry && !!state.boundingBox && (!state.moldGenerated || paramsChanged);
@@ -721,10 +730,13 @@ export default function App() {
             setState(prev => ({ ...prev, wallThicknessRatio }))}
           onClearanceChange={(clearanceRatio: number) =>
             setState(prev => ({ ...prev, clearanceRatio }))}
+          onMoldBoxShapeChange={(moldBoxShape: MoldBoxShape) =>
+            setState(prev => ({ ...prev, moldBoxShape }))}
           onResetDimensions={() => setState(prev => ({
             ...prev,
             wallThicknessRatio: WALL_THICKNESS_RATIO,
             clearanceRatio: CLEARANCE_RATIO,
+            moldBoxShape: 'rect',
           }))}
           onGenerate={handleGenerate}
           onAutoDetect={handleAutoDetect}

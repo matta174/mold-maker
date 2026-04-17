@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Axis } from '../types';
+import type { Axis, MoldBoxShape } from '../types';
 import {
   WALL_THICKNESS_RATIO,
   CLEARANCE_RATIO,
@@ -18,10 +18,11 @@ import {
   createBox,
 } from './manifoldBridge';
 import {
-  getRegistrationPinPositions,
+  getRegistrationPinPositionsForEnvelope,
   getRotationForAxis,
   computeChannelPositions,
 } from './channelPlacement';
+import { computeMoldEnvelope, createMoldBoxManifold } from './moldBox';
 
 /**
  * Optional overrides for tunables that are otherwise read from ./constants.
@@ -33,6 +34,8 @@ export interface GenerateMoldOptions {
   wallThicknessRatio?: number;
   /** Clearance between mating surfaces as a fraction of wall thickness. Defaults to CLEARANCE_RATIO. */
   clearanceRatio?: number;
+  /** Outer shell shape. Defaults to 'rect' for backwards compatibility. */
+  moldBoxShape?: MoldBoxShape;
 }
 
 /**
@@ -63,6 +66,7 @@ export async function generateMold(
   // rather than hide the bad input here.
   const wallThicknessRatio = options.wallThicknessRatio ?? WALL_THICKNESS_RATIO;
   const clearanceRatio = options.clearanceRatio ?? CLEARANCE_RATIO;
+  const moldBoxShape: MoldBoxShape = options.moldBoxShape ?? 'rect';
 
   // Compute actual split position
   const bboxSize = new THREE.Vector3();
@@ -83,18 +87,13 @@ export async function generateMold(
   // Scale-relative so it works for models measured in microns or meters.
   const planeEpsilon = maxExtent * 1e-6;
 
-  // Mold outer box dimensions
-  const moldSize = new THREE.Vector3(
-    bboxSize.x + wallThickness * 2,
-    bboxSize.y + wallThickness * 2,
-    bboxSize.z + wallThickness * 2,
-  );
-
-  const moldMin = new THREE.Vector3(
-    bboxMin.x - wallThickness,
-    bboxMin.y - wallThickness,
-    bboxMin.z - wallThickness,
-  );
+  // Mold outer envelope — shape-aware. AABB fields are still used by the
+  // axis-aligned cutters and channel placement below (they reason about the
+  // bounding region, not the shell silhouette). For non-rect shapes, the
+  // envelope's AABB is the circumscribing box of the actual shell.
+  const envelope = computeMoldEnvelope(boundingBox, moldBoxShape, axis, wallThickness);
+  const moldSize = envelope.moldSize;
+  const moldMin = envelope.moldMin;
 
   // Convert the model to a Manifold
   let modelManifold;
@@ -105,11 +104,8 @@ export async function generateMold(
     throw new Error('Could not convert geometry to manifold. The model may not be watertight.');
   }
 
-  // Create the full mold box
-  const fullBox = createBox(wasm,
-    moldSize.x, moldSize.y, moldSize.z,
-    moldMin.x, moldMin.y, moldMin.z,
-  );
+  // Create the full mold box (rect / cylinder / roundedRect)
+  const fullBox = createMoldBoxManifold(wasm, envelope);
 
   // Subtract the model from the box to get the mold cavity
   const moldCavity = fullBox.subtract(modelManifold);
@@ -154,7 +150,7 @@ export async function generateMold(
   // Add registration pins/keys to help alignment
   const pinRadius = wallThickness * PIN_RADIUS_RATIO;
   const pinHeight = wallThickness * PIN_HEIGHT_RATIO;
-  const pinPositions = getRegistrationPinPositions(boundingBox, axis, splitPos, wallThickness);
+  const pinPositions = getRegistrationPinPositionsForEnvelope(envelope, boundingBox, splitPos);
 
   let topResult = topHalf;
   let bottomResult = bottomHalf;

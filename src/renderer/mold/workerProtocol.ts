@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { MoldBoxShape } from '../types';
 
 /**
  * Message protocol between the main thread and the mold-generation worker.
@@ -33,6 +34,8 @@ export type WorkerRequest = {
      */
     wallThicknessRatio?: number;
     clearanceRatio?: number;
+    /** Outer shell shape. Omitted → 'rect' (legacy behaviour). */
+    moldBoxShape?: MoldBoxShape;
   };
 };
 

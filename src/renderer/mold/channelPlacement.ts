@@ -8,6 +8,8 @@ import {
   MIN_VENTS,
   dbg,
 } from './constants';
+import type { MoldEnvelope } from './moldBox';
+import { lateralAxisIndices, primaryAxisIndex } from './moldBox';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registration pin and sprue/vent placement
@@ -53,6 +55,56 @@ export function getRegistrationPinPositions(
       break;
   }
 
+  return positions;
+}
+
+/**
+ * Shape-aware registration pin placement.
+ *
+ * - `rect` / `roundedRect`: delegates to the legacy AABB-corner logic. The cap
+ *   in `pickCornerRadius` guarantees pin bodies clear the rounded cutout for
+ *   `roundedRect`.
+ * - `cylinder`: places 4 pins at cardinal directions (0/90/180/270°) on the
+ *   parting plane, at a radial distance matching the bbox-corner case so pins
+ *   still sit in the wall material between cavity and shell.
+ *
+ * Kept as a separate function (rather than overloading `getRegistrationPinPositions`)
+ * so existing callers and tests keep working unchanged.
+ */
+export function getRegistrationPinPositionsForEnvelope(
+  env: MoldEnvelope,
+  bbox: THREE.Box3,
+  splitPos: number,
+): [number, number, number][] {
+  if (env.shape !== 'cylinder') {
+    return getRegistrationPinPositions(bbox, env.axis, splitPos, env.wallThickness);
+  }
+
+  // Cylinder: radial pins on the parting plane.
+  const primary = primaryAxisIndex(env.axis);
+  const [latA, latB] = lateralAxisIndices(env.axis);
+  const bboxSize = new THREE.Vector3();
+  bbox.getSize(bboxSize);
+  const halfLatA = bboxSize.getComponent(latA) / 2;
+  const halfLatB = bboxSize.getComponent(latB) / 2;
+
+  // Radial distance: mid-wall between the part's bounding circle and the
+  // outer cylinder wall. Matches the rect case's "pin sits in the wall, inset
+  // from the outer face by (1 - PIN_INSET_RATIO) * wallThickness".
+  const partCircleRadius = Math.sqrt(halfLatA * halfLatA + halfLatB * halfLatB);
+  const pinRadialDist = partCircleRadius + env.wallThickness * (1 - PIN_INSET_RATIO);
+
+  const centerA = env.cylinderCenterLatA ?? 0;
+  const centerB = env.cylinderCenterLatB ?? 0;
+
+  const positions: [number, number, number][] = [];
+  for (const [da, db] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+    const pos: [number, number, number] = [0, 0, 0];
+    pos[primary] = splitPos;
+    pos[latA] = centerA + da * pinRadialDist;
+    pos[latB] = centerB + db * pinRadialDist;
+    positions.push(pos);
+  }
   return positions;
 }
 

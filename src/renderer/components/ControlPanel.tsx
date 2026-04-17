@@ -1,5 +1,5 @@
 import type { AppState } from '../App';
-import type { Axis } from '../types';
+import type { Axis, MoldBoxShape } from '../types';
 import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from '../mold/constants';
 import { colors, radii, spacing, fontSizes } from '../theme';
 import { PRINTER_PRESETS, getPresetById } from '../utils/printerPresets';
@@ -12,6 +12,7 @@ interface ControlPanelProps {
   onOffsetChange: (offset: number) => void;
   onWallThicknessChange: (ratio: number) => void;
   onClearanceChange: (ratio: number) => void;
+  onMoldBoxShapeChange: (shape: MoldBoxShape) => void;
   onResetDimensions: () => void;
   onGenerate: () => void;
   onAutoDetect: () => void;
@@ -172,7 +173,7 @@ const styles = {
 
 export default function ControlPanel({
   state, onLoadFile, onAxisChange, onOffsetChange,
-  onWallThicknessChange, onClearanceChange, onResetDimensions,
+  onWallThicknessChange, onClearanceChange, onMoldBoxShapeChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
   onToggleExplode, onToggleOriginal, onToggleHeatmap, onToggleWireframe, onStartOver,
   onPrinterChange, onScaleChange, onResetScale,
@@ -212,7 +213,8 @@ export default function ControlPanel({
   // clicking it does nothing.
   const dimensionsAtDefaults =
     state.wallThicknessRatio === WALL_THICKNESS_RATIO &&
-    state.clearanceRatio === CLEARANCE_RATIO;
+    state.clearanceRatio === CLEARANCE_RATIO &&
+    state.moldBoxShape === 'rect';
 
   // Compare current params against the params used for the last successful
   // mold generation. When different, the existing mold is stale and the primary
@@ -223,7 +225,8 @@ export default function ControlPanel({
     state.generatedParams.axis !== state.axis ||
     state.generatedParams.offset !== state.planeOffset ||
     state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
-    state.generatedParams.clearanceRatio !== state.clearanceRatio
+    state.generatedParams.clearanceRatio !== state.clearanceRatio ||
+    state.generatedParams.moldBoxShape !== state.moldBoxShape
   );
 
   const primaryLabel = state.generating
@@ -345,7 +348,7 @@ export default function ControlPanel({
       {hasModel && (
         <div style={styles.section}>
           <div style={styles.sectionHeaderRow}>
-            <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Mold Dimensions</div>
+            <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Mold Box</div>
             <button
               type="button"
               onClick={onResetDimensions}
@@ -358,6 +361,38 @@ export default function ControlPanel({
             >
               Reset to defaults
             </button>
+          </div>
+
+          {/* Mold box shape — rect is default, cylinder wins for round parts
+              (bottles, dials), roundedRect is a small FDM-durability upgrade
+              over rect. Rendered as a segmented 3-way control to match the
+              axis picker aesthetic below. */}
+          <div style={{ marginBottom: spacing.md }}>
+            <label style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}>
+              Box Shape
+            </label>
+            <div style={{ display: 'flex', gap: spacing.xs }} role="radiogroup" aria-label="Mold box shape">
+              {([
+                { id: 'rect', label: 'Rect', title: 'Axis-aligned rectangular box (default)' },
+                { id: 'cylinder', label: 'Cylinder', title: 'Circular cross-section — cleaner demold for round parts' },
+                { id: 'roundedRect', label: 'Rounded', title: 'Rectangular with rounded vertical edges — more durable on FDM' },
+              ] as { id: MoldBoxShape; label: string; title: string }[]).map(opt => {
+                const active = state.moldBoxShape === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    title={opt.title}
+                    onClick={() => onMoldBoxShapeChange(opt.id)}
+                    style={styles.axisBtn(active)}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div style={{ marginBottom: spacing.md }}>

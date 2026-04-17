@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import type { Axis } from '../types';
+import type { Axis, MoldBoxShape } from '../types';
 import { autoDetectPlane as autoDetectPlaneImpl } from '../mold/generateMold';
 import { exportSTL, exportOBJ, export3MF } from '../mold/exporters';
 import {
@@ -67,7 +67,11 @@ export function useMoldGenerator() {
       boundingBox: THREE.Box3,
       axis: Axis,
       offset: number,
-      options: { wallThicknessRatio?: number; clearanceRatio?: number } = {},
+      options: {
+        wallThicknessRatio?: number;
+        clearanceRatio?: number;
+        moldBoxShape?: MoldBoxShape;
+      } = {},
     ): Promise<{ top: THREE.BufferGeometry; bottom: THREE.BufferGeometry }> => {
       const worker = getWorker();
       const id = ++requestIdRef.current;
@@ -97,6 +101,7 @@ export function useMoldGenerator() {
           offset,
           wallThicknessRatio: options.wallThicknessRatio,
           clearanceRatio: options.clearanceRatio,
+          moldBoxShape: options.moldBoxShape,
         },
       };
 
