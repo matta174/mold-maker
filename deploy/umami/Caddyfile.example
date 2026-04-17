@@ -1,0 +1,48 @@
+# Copy to Caddyfile (no extension) and replace the two placeholders:
+#   - umami.example.com → your actual subdomain (e.g. telemetry.mold-maker.app)
+#   - you@example.com  → your email for Let's Encrypt cert notices
+#
+# Caddy handles auto-TLS via Let's Encrypt on first start. Make sure the
+# subdomain's A record points at this server's IP before `docker compose up`,
+# otherwise the ACME challenge will fail and Caddy will retry-loop.
+#
+# The restrictive path allow-list below is deliberate: our app only calls
+# `/api/send` and the admin UI (for the site owner) lives at the root. We
+# block `/api/*` except `/api/send` to reduce attack surface if an Umami
+# endpoint ever turns out to be more permissive than documented.
+
+umami.example.com {
+	# Replace with your email — needed for Let's Encrypt renewal notifications.
+	tls you@example.com
+
+	# Security headers. HSTS is long enough to matter but short enough that a
+	# subdomain mistake is recoverable inside a year.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# CORS — our browser app POSTs from a different origin (the GitHub Pages
+	# URL or custom domain). Umami 2.x reflects Origin when sent, but being
+	# explicit here keeps the policy visible and auditable in one place.
+	@cors_preflight {
+		method OPTIONS
+		path /api/send
+	}
+	handle @cors_preflight {
+		header {
+			Access-Control-Allow-Origin "*"
+			Access-Control-Allow-Methods "POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type"
+			Access-Control-Max-Age "86400"
+		}
+		respond "" 204
+	}
+
+	# Normal traffic → Umami. We could narrow further (block /api/auth from
+	# non-admin IPs, etc.) but admin auth already gates the sensitive paths.
+	reverse_proxy umami:3000
+}

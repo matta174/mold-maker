@@ -50,10 +50,17 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const telemetryHost = env.VITE_TELEMETRY_HOST || process.env.VITE_TELEMETRY_HOST || '';
 
+  // Base path. Default is './' (relative) so the build works both when loaded
+  // via file:// in Electron and when served from a web root. For GitHub Pages
+  // deploys at `user.github.io/repo-name/` we pass `VITE_BASE_PATH=/repo-name/`
+  // so asset URLs are absolute-from-root and survive the no-trailing-slash
+  // redirect that GH Pages performs on directory URLs.
+  const basePath = env.VITE_BASE_PATH || process.env.VITE_BASE_PATH || './';
+
   return {
     plugins: [react(), telemetryCspPlugin(telemetryHost)],
     root: '.',
-    base: './',
+    base: basePath,
     build: {
       outDir: 'dist/renderer',
       emptyOutDir: true,

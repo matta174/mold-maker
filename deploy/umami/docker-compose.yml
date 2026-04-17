@@ -1,0 +1,66 @@
+# Self-hosted Umami stack for Mold Maker telemetry.
+#
+# Three services: Caddy (reverse proxy + auto-TLS), Umami (analytics app),
+# and Postgres (event storage). The healthcheck on Postgres gates Umami
+# startup — without it Umami's first-boot migration can race against a
+# not-ready DB and the container restart-loops.
+#
+# This file is intentionally minimal. It runs on anything Docker-capable:
+# a €4/mo Hetzner CX11, a DigitalOcean $6 droplet, a home server, whatever.
+# Before `docker compose up -d`, copy .env.example to .env and fill in the
+# values (see deploy/umami/README.md for the full runbook).
+#
+# Version pin rationale: we pin Umami + Postgres by major+minor so nothing
+# silently upgrades under you. Bump explicitly after reading the release notes.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # certs + ACME account info; losing this = re-issue certs
+      - caddy_config:/config
+    depends_on:
+      - umami
+
+  umami:
+    # NOTE: bump to the latest stable tag before deploying:
+    # https://github.com/umami-software/umami/releases
+    image: ghcr.io/umami-software/umami:postgresql-v2.18.0
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_TYPE: postgresql
+      APP_SECRET: ${APP_SECRET}
+      # DISABLE_TELEMETRY stops Umami itself from phoning home to umami-software.
+      # We're building a privacy-preserving pipeline; defaulting this off keeps
+      # that promise all the way down.
+      DISABLE_TELEMETRY: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # No published ports — Caddy proxies to Umami over the internal docker network.
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

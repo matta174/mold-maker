@@ -1,0 +1,89 @@
+# Build the renderer with telemetry env vars injected, then publish to
+# GitHub Pages.
+#
+# Design notes:
+# - Runs on push to main AND manually (workflow_dispatch), so the maintainer
+#   can redeploy after rotating the Umami website ID without a code change.
+# - The two telemetry secrets are optional. Missing secrets produce a build
+#   where the CSP stays `'self' blob:` and sendTelemetry is a no-op. That's
+#   the correct behavior for forks that don't want to run their own analytics.
+# - We pin the GH Pages deploy actions to major versions (@v5, @v4) rather
+#   than SHAs because this is low-stakes: the worst case is a broken deploy,
+#   not a compromised build. If you're security-paranoid, pin to SHAs.
+# - Concurrency group cancels in-flight deploys when a new commit lands —
+#   otherwise two near-simultaneous pushes race and you get nondeterministic
+#   "which build won."
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npx vitest run
+
+      - name: Build renderer
+        # VITE_BASE_PATH pins the asset prefix to the repo name so GH Pages'
+        # subpath serving works. Update this if you switch to a custom domain
+        # served at root (then you'd want VITE_BASE_PATH=/).
+        #
+        # VITE_TELEMETRY_HOST + WEBSITE_ID are read from repo Secrets. If the
+        # secrets are unset, the shell expansion produces empty strings, the
+        # CSP plugin leaves connect-src as `'self' blob:`, and telemetry is
+        # inert in the shipped build — which is the correct failure mode.
+        run: npx vite build --config vite.renderer.config.ts
+        env:
+          VITE_BASE_PATH: /mold-maker/
+          VITE_TELEMETRY_HOST: ${{ secrets.VITE_TELEMETRY_HOST }}
+          VITE_TELEMETRY_WEBSITE_ID: ${{ secrets.VITE_TELEMETRY_WEBSITE_ID }}
+
+      - name: Copy index.html as 404.html
+        # GH Pages serves 404.html for any unknown path. Copying index.html
+        # there means a user who hits a stale / typo'd URL still gets the app
+        # instead of a GitHub error page. We have no client-side router so
+        # this is purely a polish thing — remove if you add React Router.
+        run: cp dist/renderer/index.html dist/renderer/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/renderer
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
