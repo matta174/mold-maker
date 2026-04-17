@@ -19,6 +19,15 @@ interface ControlPanelProps {
   onToggleHeatmap: () => void;
   onToggleWireframe: () => void;
   onStartOver: () => void;
+  /** Privacy section: only rendered when the build was compiled with a
+   *  telemetry host (VITE_TELEMETRY_HOST). Forks without a host see nothing. */
+  telemetryConfigured: boolean;
+  /** Current opt-in state for the privacy-section toggle label. */
+  telemetryEnabled: boolean;
+  /** Called when the toggle switches on → grantConsent under the hood. */
+  onTelemetryAllow: () => void;
+  /** Called when the toggle switches off → declineConsent. */
+  onTelemetryDecline: () => void;
 }
 
 // Slider bounds for the new mold-dimension controls.
@@ -158,6 +167,7 @@ export default function ControlPanel({
   onWallThicknessChange, onClearanceChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
   onToggleExplode, onToggleOriginal, onToggleHeatmap, onToggleWireframe, onStartOver,
+  telemetryConfigured, telemetryEnabled, onTelemetryAllow, onTelemetryDecline,
 }: ControlPanelProps) {
   const hasModel = !!state.originalGeometry;
   const hasMold = state.moldGenerated;
@@ -385,6 +395,34 @@ export default function ControlPanel({
             <button type="button" style={styles.exportBtn} onClick={() => onExport('stl')}>STL</button>
             <button type="button" style={styles.exportBtn} onClick={() => onExport('obj')}>OBJ</button>
             <button type="button" style={styles.exportBtn} onClick={() => onExport('3mf')}>3MF</button>
+          </div>
+        </div>
+      )}
+
+      {/* Privacy section — only visible if the build was compiled with a
+          telemetry host. Forks without VITE_TELEMETRY_HOST get a completely
+          invisible privacy section, so the UI doesn't advertise a feature
+          that can't work. The toggle wraps grant/decline so a user who turns
+          it off actually records a decline (= we don't re-prompt). */}
+      {telemetryConfigured && (
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>Privacy</div>
+          <div style={styles.toggleRow}>
+            <span style={styles.label}>Anonymous usage data</span>
+            <ToggleSwitch
+              active={telemetryEnabled}
+              onClick={telemetryEnabled ? onTelemetryDecline : onTelemetryAllow}
+              label="Send anonymous usage data"
+            />
+          </div>
+          <div style={{
+            fontSize: fontSizes.xs,
+            color: colors.textDim,
+            marginTop: spacing.sm,
+            lineHeight: 1.4,
+          }}>
+            Five coarse events. No file contents, no mesh data, no paths.
+            See PRIVACY.md for the full list.
           </div>
         </div>
       )}

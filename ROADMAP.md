@@ -29,6 +29,7 @@ The current 1.0 release handles the core two-part mold workflow end to end:
 - Demoldability heatmap overlay — per-face classification (green / yellow / red) lets you see undercuts before running the CSG
 - First-run polish: bundled procedural sample model, drag-and-drop STL/OBJ onto the viewport, keyboard shortcuts with a `?`-triggered cheat-sheet overlay
 - Wireframe toggle in the viewport (`W` shortcut, also in the View panel) — inspect mesh topology on the loaded model *or* generated mold halves
+- Opt-in anonymous telemetry (five coarse events, off by default, self-hosted Umami, CSP-locked to a single endpoint, full list in [PRIVACY.md](./PRIVACY.md)) — gives the project real usage data to replace guess-driven prioritization, without touching file contents, paths, or identifiers
 
 What it doesn't do yet is where this roadmap comes in.
 
@@ -36,7 +37,7 @@ What it doesn't do yet is where this roadmap comes in.
 
 *Empty as of 2026-04-16.* The three items this bucket opened with — wall thickness + clearance sliders, the demoldability heatmap, and first-run polish — have all shipped. The next focus has not been picked yet.
 
-Candidates are in Next below, but honestly, it'd be more useful to let real users try the current build and tell us what they hit first rather than guess. If a specific item matters to you, **file an issue** — that's the loudest signal we have right now. Telemetry (item 11) exists on the roadmap partly to replace this guesswork with data.
+Candidates are in Next below, but honestly, it'd be more useful to let real users try the current build and tell us what they hit first rather than guess. If a specific item matters to you, **file an issue** — that's the loudest signal we have right now. Opt-in telemetry (now shipped) will start answering some of these questions with data instead of vibes, but only from users who volunteer the signal.
 
 ## Next (Soon)
 
@@ -50,7 +51,7 @@ Adds STEP export via `occt-import-js` or `opencascade.js`. Signals "prosumer-gra
 
 Honest caveat: the OpenCascade WASM binary is ~10MB. We'd want this opt-in (load on first use, not eagerly). If nobody actually uses it we'd rather know before shipping the binary to everyone.
 
-Dependencies: ideally we'd ship some lightweight opt-in telemetry first (item 11) so we can tell whether STEP export gets used.
+Dependencies: telemetry is already in place (see "What Ships Today"), and `file_exported` already records which format users pick — so by the time STEP lands we'll have baseline data on STL/OBJ/3MF split to compare against. If STEP adoption is dismal we'll know.
 
 ### 5. Oblique parting planes (cut angle) 🌿
 
@@ -90,15 +91,7 @@ Deliberately deprioritized below the demoldability heatmap (item 1) because the 
 
 Dropdown of common build plates (Bambu X1C, Prusa MK4, Ender 3, custom) with a soft scale suggestion — *not* a forced auto-scale. `mold.actionbox.ca` force-scales everything to 69×80×48mm, which is convenient until it destroys the user's careful 1:1 sculpt without warning. We can do the polite version.
 
-### 11. Opt-in anonymous telemetry 🌿
-
-**Effort:** ~5-7 days · **Status:** Not Started
-
-Tiny self-hosted endpoint that collects: feature usage counts, generation success/failure rate, export format choices. Opt-in, off by default, documented in the privacy notice. No mesh data, no identifying info.
-
-Why this is on the roadmap at all: right now roadmap priority is driven by my intuition and one competitive analysis. Telemetry converts that into data. Without it we're building on vibes.
-
-### 12. Internationalization (i18n) 🌿
+### 11. Internationalization (i18n) 🌿
 
 **Effort:** ~5-7 days · **Status:** Not Started
 
@@ -137,3 +130,4 @@ Open an issue describing the problem you're solving (not just the feature you wa
 - **2026-04-16** — Shipped *Demoldability heatmap overlay* (was Now #1). Per-face green/yellow/red classification with a viewport legend; toggle lives in the Parting Plane section so it's right next to the axis decision it informs. Moved to "What Ships Today"; remaining Now items renumbered.
 - **2026-04-16** — Shipped *First-run polish* (was Now #1). Bundled procedural sample mushroom (deliberately designed to hit every heatmap classification), drag-and-drop file loading on the viewport, and keyboard shortcuts (`O` open, `G` generate, `A` auto-detect, `H` heatmap, `E` explode, `X`/`Y`/`Z` axis, `?` help, `Esc` close). Moved to "What Ships Today"; Now bucket is now empty pending the next focus decision.
 - **2026-04-16** — Shipped *Wireframe toggle* (was Next #7, pulled forward as a one-day warm-up). Bound to `W` shortcut, surfaced in a promoted View panel that now appears as soon as a model loads (not only after mold generation). The `wireframe` prop was already plumbed through `ModelViewer` — this wired state, keybind, toggle, and cheat-sheet entry. Moved to "What Ships Today"; Next bucket is now items 4–6 (STEP, Oblique, Mold Box).
+- **2026-04-16** — Shipped *Opt-in anonymous telemetry* (was Later #11). Five event schema (`session_started`, `model_loaded`, `mold_generated`, `plane_auto_detected`, `file_exported`) with TypeScript-enforced property types so there's no free-form string that could leak paths or names. Off by default, consent prompted after first successful mold generation (not on launch), toggleable in Control Panel → Privacy, versioned so future scope changes re-prompt. Self-hosted Umami target, host hardcoded at build time via `VITE_TELEMETRY_HOST`, CSP `connect-src` locked to that one host so a compromised dep cannot exfiltrate anywhere else; forks built without the env var have the Privacy section invisible and architecturally cannot phone home. Full details in [PRIVACY.md](./PRIVACY.md). Moved to "What Ships Today"; remaining Later items renumbered (i18n is now #11).

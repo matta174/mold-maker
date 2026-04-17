@@ -14,6 +14,7 @@ import { colors, radii, spacing, fontSizes, focusVisibleCss } from './theme';
 import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from './mold/constants';
 import { useTelemetry } from './services/useTelemetry';
 import { buildEvent } from './services/telemetryEvents';
+import FirstRunTelemetryModal from './components/FirstRunTelemetryModal';
 
 export type { Axis } from './types';
 
@@ -86,6 +87,13 @@ export default function App() {
    * lives outside AppState.
    */
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  /**
+   * First-run telemetry consent modal visibility. Set to true in the
+   * mold_generated success branch IFF telemetry is configured and we haven't
+   * asked the user yet. Deliberately NOT stored in AppState — it's a
+   * one-shot modal driven by a settings value that already persists.
+   */
+  const [telemetryModalOpen, setTelemetryModalOpen] = useState(false);
   const { generateMold, exportFiles, autoDetectPlane } = useMoldGenerator();
   const telemetry = useTelemetry();
 
@@ -254,6 +262,13 @@ export default function App() {
       // Z dominates (it will) or any axis is unexpectedly common — a signal
       // about auto-detect quality and the default axis choice.
       telemetry.send(buildEvent('mold_generated', { success: true, axisUsed: params.axis }));
+      // Consent moment: AFTER the user has just seen the product deliver
+      // value, not before. Gated on `configured` so open-source forks without
+      // a telemetry host never see this modal, and on `needsConsent` so we
+      // don't re-ask users who've already made a decision.
+      if (telemetry.configured && telemetry.needsConsent) {
+        setTelemetryModalOpen(true);
+      }
     } catch (err) {
       console.error('Mold generation failed:', err);
       // Coarse failure tagging only — the exception message may contain
@@ -685,6 +700,10 @@ export default function App() {
           onToggleHeatmap={() => setState(prev => ({ ...prev, showHeatmap: !prev.showHeatmap }))}
           onToggleWireframe={() => setState(prev => ({ ...prev, wireframe: !prev.wireframe }))}
           onStartOver={() => setState(initialState)}
+          telemetryConfigured={telemetry.configured}
+          telemetryEnabled={telemetry.settings.telemetryEnabled}
+          onTelemetryAllow={telemetry.grant}
+          onTelemetryDecline={telemetry.decline}
         />
       </div>
 
@@ -717,6 +736,29 @@ export default function App() {
 
       {shortcutHelpOpen && (
         <ShortcutCheatSheet onClose={() => setShortcutHelpOpen(false)} />
+      )}
+
+      {/* First-run consent modal. Only ever visible if the build was
+          configured with a telemetry host AND the user hasn't yet been
+          asked. Rendered outside the main layout flow so it can overlay
+          everything including the control panel. */}
+      {telemetryModalOpen && (
+        <FirstRunTelemetryModal
+          onAllow={() => {
+            telemetry.grant();
+            setTelemetryModalOpen(false);
+          }}
+          onDecline={() => {
+            telemetry.decline();
+            setTelemetryModalOpen(false);
+          }}
+          onDismiss={() => {
+            // Escape / backdrop — close without recording a decision. The
+            // modal will reappear on the next successful mold generation.
+            // See component docblock for why we don't treat this as decline.
+            setTelemetryModalOpen(false);
+          }}
+        />
       )}
     </>
   );
