@@ -47,6 +47,19 @@ export function parseModel(
   }
 }
 
+/**
+ * Parse an already-in-hand File (from <input type=file> or a drag-drop
+ * DataTransfer). Shared by the file-input fallback inside loadFile() and
+ * by the drag-drop handler in App.tsx so both entry points produce the
+ * same normalized `{ geometry, fileName }` shape.
+ */
+export async function parseFile(
+  file: File,
+): Promise<{ geometry: THREE.BufferGeometry; fileName: string }> {
+  const arrayBuffer = await file.arrayBuffer();
+  return parseModel(arrayBuffer, file.name);
+}
+
 export async function loadFile(): Promise<{ geometry: THREE.BufferGeometry; fileName: string } | null> {
   // Detect the hardened Electron bridge exposed by preload.ts. With
   // contextIsolation:true + nodeIntegration:false, `window.require` is
@@ -72,8 +85,7 @@ export async function loadFile(): Promise<{ geometry: THREE.BufferGeometry; file
       if (!file) { resolve(null); return; }
 
       try {
-        const arrayBuffer = await file.arrayBuffer();
-        resolve(parseModel(arrayBuffer, file.name));
+        resolve(await parseFile(file));
       } catch (err) {
         reject(err);
       }

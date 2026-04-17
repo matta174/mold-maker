@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, Fragment } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
@@ -7,7 +7,8 @@ import ControlPanel from './components/ControlPanel';
 import PartingPlane from './components/PartingPlane';
 import HeatmapOverlay from './components/HeatmapOverlay';
 import { useMoldGenerator, EXPLODE_OFFSET_RATIO } from './hooks/useMoldGenerator';
-import { loadFile } from './utils/fileLoader';
+import { loadFile, parseFile } from './utils/fileLoader';
+import { createSampleModel } from './utils/sampleModel';
 import type { Axis } from './types';
 import { colors, radii, spacing, fontSizes, focusVisibleCss } from './theme';
 import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from './mold/constants';
@@ -73,6 +74,12 @@ const initialState: AppState = {
 
 export default function App() {
   const [state, setState] = useState<AppState>(initialState);
+  /**
+   * Cheat-sheet overlay visibility. Pure UI ephemeral state — doesn't need
+   * to survive anything, doesn't need to flow through ControlPanel, so it
+   * lives outside AppState.
+   */
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const { generateMold, exportFiles, autoDetectPlane } = useMoldGenerator();
 
   // ── Geometry disposal effects ──
@@ -96,25 +103,36 @@ export default function App() {
     return () => { g?.dispose(); };
   }, [state.bottomMold]);
 
+  /**
+   * Commit a freshly-parsed geometry to app state. Shared between the
+   * file-picker, drag-drop, and sample-model entry points so all three
+   * go through identical normalization (center, bbox, vertex normals)
+   * and identical state-reset semantics. Wrapping this once avoids the
+   * three-way drift that would otherwise appear the first time someone
+   * "fixes" a bug in just one code path.
+   */
+  const commitGeometry = useCallback((
+    geometry: THREE.BufferGeometry,
+    fileName: string,
+  ) => {
+    geometry.computeBoundingBox();
+    geometry.center();
+    geometry.computeVertexNormals();
+    const bbox = geometry.boundingBox!.clone();
+    setState({
+      ...initialState,
+      originalGeometry: geometry,
+      fileName,
+      boundingBox: bbox,
+      showOriginal: true,
+    });
+  }, []);
+
   const handleFileLoad = useCallback(async () => {
     try {
       const result = await loadFile();
       if (!result) return;
-
-      const { geometry, fileName } = result;
-      geometry.computeBoundingBox();
-      geometry.center();
-      geometry.computeVertexNormals();
-
-      const bbox = geometry.boundingBox!.clone();
-
-      setState({
-        ...initialState,
-        originalGeometry: geometry,
-        fileName,
-        boundingBox: bbox,
-        showOriginal: true,
-      });
+      commitGeometry(result.geometry, result.fileName);
     } catch (err) {
       console.error('File load failed:', err);
       setState(prev => ({
@@ -122,6 +140,49 @@ export default function App() {
         errorMessage: err instanceof Error ? err.message : 'Failed to load file.',
       }));
     }
+  }, [commitGeometry]);
+
+  const handleLoadSample = useCallback(() => {
+    try {
+      const { geometry, fileName } = createSampleModel();
+      commitGeometry(geometry, fileName);
+    } catch (err) {
+      console.error('Sample load failed:', err);
+      setState(prev => ({
+        ...prev,
+        errorMessage: err instanceof Error ? err.message : 'Failed to load sample.',
+      }));
+    }
+  }, [commitGeometry]);
+
+  /**
+   * Drag-and-drop handler. We only accept a single file — dropping a
+   * folder or multiple files takes the first file and surfaces an error
+   * if the extension doesn't match. The browser's drag-drop File object
+   * is identical to the one from <input type=file>, so we reuse parseFile.
+   */
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    try {
+      const result = await parseFile(file);
+      commitGeometry(result.geometry, result.fileName);
+    } catch (err) {
+      console.error('Drop-load failed:', err);
+      setState(prev => ({
+        ...prev,
+        errorMessage: err instanceof Error ? err.message : 'Failed to load dropped file.',
+      }));
+    }
+  }, [commitGeometry]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    // Must preventDefault on *both* dragover and drop to opt out of the
+    // browser default (navigate to the file). Missing dragover silently
+    // makes drop a no-op and is a classic drag-drop gotcha.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
   }, []);
 
   const handleGenerate = useCallback(async () => {
@@ -220,6 +281,90 @@ export default function App() {
     setState(prev => ({ ...prev, errorMessage: null }));
   }, []);
 
+  // ── Global keyboard shortcuts ──
+  // Installed once per relevant-state change. The skip-if-in-input check is
+  // critical: without it, hitting "X" while focused on the plane-position
+  // slider would try to jump to X-axis *and* nudge the slider. Range inputs
+  // in particular use arrow keys, so we want zero interception while one is
+  // focused.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don't steal keystrokes from focused form controls.
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable
+        ) return;
+      }
+      // Don't interfere with browser/OS chords — Cmd-R reload, Ctrl-F find, etc.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // ? (or Shift+/) toggles the cheat sheet. Escape always closes it.
+      if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+        e.preventDefault();
+        setShortcutHelpOpen(v => !v);
+        return;
+      }
+      if (e.key === 'Escape' && shortcutHelpOpen) {
+        e.preventDefault();
+        setShortcutHelpOpen(false);
+        return;
+      }
+      // Suppress other shortcuts while the overlay is open — the overlay
+      // reads like a dialog and shouldn't be acting on background shortcuts.
+      if (shortcutHelpOpen) return;
+
+      switch (e.key.toLowerCase()) {
+        case 'o':
+          e.preventDefault();
+          handleFileLoad();
+          break;
+        case 'g':
+          if (state.originalGeometry && !state.generating) {
+            e.preventDefault();
+            handleGenerate();
+          }
+          break;
+        case 'a':
+          if (state.originalGeometry && !state.autoDetecting) {
+            e.preventDefault();
+            handleAutoDetect();
+          }
+          break;
+        case 'h':
+          if (state.originalGeometry) {
+            e.preventDefault();
+            setState(prev => ({ ...prev, showHeatmap: !prev.showHeatmap }));
+          }
+          break;
+        case 'e':
+          if (state.moldGenerated) {
+            e.preventDefault();
+            setState(prev => ({ ...prev, explodedView: !prev.explodedView }));
+          }
+          break;
+        case 'x':
+        case 'y':
+        case 'z':
+          if (state.originalGeometry) {
+            e.preventDefault();
+            setState(prev => ({ ...prev, axis: e.key.toLowerCase() as Axis }));
+          }
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    shortcutHelpOpen,
+    state.originalGeometry, state.generating, state.autoDetecting, state.moldGenerated,
+    handleFileLoad, handleGenerate, handleAutoDetect,
+  ]);
+
   // Visual indicator of the current parting plane. Shown before first generation
   // OR after, when the user has moved the slider/axis away from the params the
   // current mold was generated with (so the indicator marks where the *next*
@@ -242,7 +387,12 @@ export default function App() {
 
       <div style={{ display: 'flex', width: '100vw', height: '100vh' }}>
         {/* 3D Viewport */}
-        <main style={{ flex: 1, position: 'relative' }} aria-label="3D viewport">
+        <main
+          style={{ flex: 1, position: 'relative' }}
+          aria-label="3D viewport"
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
           <Canvas
             camera={{ position: [80, 60, 80], fov: 50, near: 0.1, far: 10000 }}
             gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
@@ -368,21 +518,21 @@ export default function App() {
             </div>
           )}
 
-          {/* Drop zone — real <button> so it's keyboard-focusable and screen
-              readers announce it as an interactive element. */}
+          {/* Drop zone — previously a single full-viewport button, now a
+              two-action region (load file vs. try sample) so first-time
+              users aren't stuck if they don't have an STL handy. The outer
+              div handles drag-over styling; the primary affordance is
+              still a real <button> for keyboard + screen-reader access. */}
           {!state.originalGeometry && (
-            <button
-              type="button"
-              onClick={handleFileLoad}
+            <div
               style={{
                 position: 'absolute', inset: 0,
                 display: 'flex', flexDirection: 'column',
                 alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', background: 'rgba(18, 24, 43, 0.85)',
-                border: 'none', color: colors.textPrimary,
+                background: 'rgba(18, 24, 43, 0.85)',
+                color: colors.textPrimary,
                 fontFamily: 'inherit',
               }}
-              aria-label="Load a 3D model file"
             >
               {/* Inline SVG instead of a platform-dependent emoji — renders
                   identically across macOS / Windows / Linux. */}
@@ -397,11 +547,51 @@ export default function App() {
                 <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
                 <line x1="12" y1="22.08" x2="12" y2="12" />
               </svg>
-              <div style={{ fontSize: fontSizes.lg, fontWeight: 600 }}>Click to load a 3D model</div>
-              <div style={{ fontSize: fontSizes.md, color: colors.textFaint, marginTop: spacing.sm }}>
+              <div style={{ fontSize: fontSizes.lg, fontWeight: 600, marginBottom: spacing.sm }}>
+                Drop a 3D model here
+              </div>
+              <div style={{ fontSize: fontSizes.md, color: colors.textFaint, marginBottom: spacing.lg }}>
                 Supports STL and OBJ files
               </div>
-            </button>
+              <div style={{ display: 'flex', gap: spacing.md }}>
+                <button
+                  type="button"
+                  onClick={handleFileLoad}
+                  style={{
+                    background: colors.primary,
+                    color: colors.textPrimary,
+                    border: 'none',
+                    borderRadius: radii.md,
+                    padding: `${spacing.md}px ${spacing.xl}px`,
+                    fontSize: fontSizes.md,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                  aria-label="Load a 3D model file"
+                >
+                  Browse Files
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLoadSample}
+                  style={{
+                    background: 'transparent',
+                    color: colors.textPrimary,
+                    border: `1px solid ${colors.borderPanel}`,
+                    borderRadius: radii.md,
+                    padding: `${spacing.md}px ${spacing.xl}px`,
+                    fontSize: fontSizes.md,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                  aria-label="Load the built-in sample model"
+                >
+                  Try Sample
+                </button>
+              </div>
+            </div>
           )}
         </main>
 
@@ -430,7 +620,148 @@ export default function App() {
           onStartOver={() => setState(initialState)}
         />
       </div>
+
+      {/* Floating help button — always available as a mouse affordance for
+          users who don't know about `?`. Positioned bottom-right of the
+          whole window, inside the main viewport's visual space. */}
+      <button
+        type="button"
+        onClick={() => setShortcutHelpOpen(true)}
+        aria-label="Keyboard shortcuts"
+        title="Keyboard shortcuts (?)"
+        style={{
+          position: 'fixed',
+          bottom: spacing.lg,
+          left: spacing.lg,
+          width: 32, height: 32,
+          borderRadius: '50%',
+          background: colors.sectionBg,
+          border: `1px solid ${colors.borderSection}`,
+          color: colors.textBody,
+          fontSize: fontSizes.md,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'inherit',
+          zIndex: 5,
+        }}
+      >
+        ?
+      </button>
+
+      {shortcutHelpOpen && (
+        <ShortcutCheatSheet onClose={() => setShortcutHelpOpen(false)} />
+      )}
     </>
+  );
+}
+
+/**
+ * Keyboard-shortcut cheat-sheet overlay. Triggered by `?`, dismissed by
+ * Escape or clicking the backdrop. Uses role="dialog" + aria-modal so
+ * screen readers announce it as a modal and focus is trapped by the
+ * platform. Deliberately NOT a form — no submit button, no focusable
+ * fields — so the native focus-trap behavior is sufficient.
+ */
+function ShortcutCheatSheet({ onClose }: { onClose: () => void }) {
+  const rows: Array<[string, string]> = [
+    ['?', 'Toggle this cheat sheet'],
+    ['O', 'Open a file (browse)'],
+    ['G', 'Generate mold'],
+    ['A', 'Auto-detect parting plane'],
+    ['H', 'Toggle demoldability heatmap'],
+    ['E', 'Toggle exploded view'],
+    ['X / Y / Z', 'Set parting axis'],
+    ['Esc', 'Close this overlay'],
+  ];
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: colors.panelBg,
+          border: `1px solid ${colors.borderPanel}`,
+          borderRadius: radii.lg,
+          padding: `${spacing.xl}px ${spacing.xl + spacing.sm}px`,
+          color: colors.textPrimary,
+          minWidth: 360,
+          maxWidth: 480,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+        }}
+      >
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: spacing.lg,
+        }}>
+          <div style={{ fontSize: fontSizes.lg, fontWeight: 600 }}>
+            Keyboard Shortcuts
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close shortcuts"
+            style={{
+              background: 'transparent',
+              color: colors.textMuted,
+              border: 'none',
+              fontSize: fontSizes.lg,
+              cursor: 'pointer',
+              padding: spacing.xs,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: spacing.lg, rowGap: spacing.sm }}>
+          {rows.map(([key, label]) => (
+            <Fragment key={key}>
+              <kbd style={{
+                background: colors.sectionBg,
+                border: `1px solid ${colors.borderSection}`,
+                borderRadius: radii.sm,
+                padding: `${spacing.xs}px ${spacing.sm}px`,
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: fontSizes.sm,
+                color: colors.textPrimary,
+                whiteSpace: 'nowrap',
+                textAlign: 'center',
+              }}>
+                {key}
+              </kbd>
+              <span style={{ fontSize: fontSizes.sm, color: colors.textBody, alignSelf: 'center' }}>
+                {label}
+              </span>
+            </Fragment>
+          ))}
+        </div>
+        <div style={{
+          marginTop: spacing.lg,
+          fontSize: fontSizes.xs,
+          color: colors.textDim,
+          textAlign: 'center',
+        }}>
+          Press <kbd style={{
+            background: colors.sectionBg,
+            border: `1px solid ${colors.borderSection}`,
+            borderRadius: radii.sm,
+            padding: `0 ${spacing.xs}px`,
+            fontFamily: 'ui-monospace, monospace',
+            fontSize: fontSizes.xs,
+          }}>?</kbd> anytime to reopen
+        </div>
+      </div>
+    </div>
   );
 }
 

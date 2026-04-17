@@ -27,24 +27,15 @@ The current 1.0 release handles the core two-part mold workflow end to end:
 - Runs in the browser *or* as an Electron desktop app (fully offline)
 - Keyboard-accessible UI with ARIA roles on controls
 - Demoldability heatmap overlay — per-face classification (green / yellow / red) lets you see undercuts before running the CSG
+- First-run polish: bundled procedural sample model, drag-and-drop STL/OBJ onto the viewport, keyboard shortcuts with a `?`-triggered cheat-sheet overlay
 
 What it doesn't do yet is where this roadmap comes in.
 
 ## Now (Active Focus)
 
-The items we think will move the needle most for first-time users. A full feature-gap analysis is in [`docs/competitive-analysis.md`](./docs/competitive-analysis.md) if you want the longer reasoning.
+*Empty as of 2026-04-16.* The three items this bucket opened with — wall thickness + clearance sliders, the demoldability heatmap, and first-run polish — have all shipped. The next focus has not been picked yet.
 
-### 1. First-run polish: sample model, drag-and-drop, shortcut cheat sheet 🌱
-
-**Effort:** ~3-5 days · **Status:** Not Started
-
-Empty state today is a blank viewport with a "Click to load" button. Three small changes collectively transform the first-run feel:
-
-- Bundle 1-2 small sample STLs (<200KB each) and add a "Try sample" link to the empty state
-- Add `onDrop` to the viewport so users can drag an STL directly onto the 3D view
-- Bind keyboard shortcuts (`W` wireframe, `E` explode, `1`/`2`/`3` axis, `R` reset view, `?` help overlay) and document them in a `?`-triggered modal
-
-Any one of these is a small PR. All three together are the difference between "huh, what now?" and "oh, this is a real tool."
+Candidates are in Next below, but honestly, it'd be more useful to let real users try the current build and tell us what they hit first rather than guess. If a specific item matters to you, **file an issue** — that's the loudest signal we have right now. Telemetry (item 11) exists on the roadmap partly to replace this guesswork with data.
 
 ## Next (Soon)
 
@@ -149,3 +140,4 @@ Open an issue describing the problem you're solving (not just the feature you wa
 - **2026-04-16** — Initial roadmap. Built from the competitive analysis in [`docs/competitive-analysis.md`](./docs/competitive-analysis.md). Now/Next/Later buckets with 12 items total plus explicit "not planned" section.
 - **2026-04-16** — Shipped *Wall thickness & clearance sliders* (was Now #2). Moved to "What Ships Today"; remaining Now items renumbered.
 - **2026-04-16** — Shipped *Demoldability heatmap overlay* (was Now #1). Per-face green/yellow/red classification with a viewport legend; toggle lives in the Parting Plane section so it's right next to the axis decision it informs. Moved to "What Ships Today"; remaining Now items renumbered.
+- **2026-04-16** — Shipped *First-run polish* (was Now #1). Bundled procedural sample mushroom (deliberately designed to hit every heatmap classification), drag-and-drop file loading on the viewport, and keyboard shortcuts (`O` open, `G` generate, `A` auto-detect, `H` heatmap, `E` explode, `X`/`Y`/`Z` axis, `?` help, `Esc` close). Moved to "What Ships Today"; Now bucket is now empty pending the next focus decision.
