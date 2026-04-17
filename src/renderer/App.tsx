@@ -12,6 +12,8 @@ import { createSampleModel } from './utils/sampleModel';
 import type { Axis } from './types';
 import { colors, radii, spacing, fontSizes, focusVisibleCss } from './theme';
 import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from './mold/constants';
+import { useTelemetry } from './services/useTelemetry';
+import { buildEvent } from './services/telemetryEvents';
 
 export type { Axis } from './types';
 
@@ -85,6 +87,19 @@ export default function App() {
    */
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const { generateMold, exportFiles, autoDetectPlane } = useMoldGenerator();
+  const telemetry = useTelemetry();
+
+  // ── Telemetry: session_started ──
+  // Fires once per mount. Empty dep array is intentional — React 18's
+  // strict-mode double-invoke in dev will double-fire; production builds
+  // won't. The send call itself is safely no-op when disabled/unconfigured,
+  // so double-fire in dev is a cosmetic dashboard issue, not a correctness one.
+  useEffect(() => {
+    telemetry.send(buildEvent('session_started', {}));
+    // telemetry.send is a stable useCallback — but listing it would tangle
+    // the lint dep array with first-render semantics. Disable is localized.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Geometry disposal effects ──
   // Three.js BufferGeometry holds GPU-side vertex buffers that are NOT reclaimed
@@ -130,21 +145,26 @@ export default function App() {
       boundingBox: bbox,
       showOriginal: true,
     });
-  }, []);
+    // Telemetry: model_loaded (success). No properties from the file — not
+    // size, not triangle count, not filename. "Did a load succeed" is the
+    // entire question this event answers.
+    telemetry.send(buildEvent('model_loaded', { success: true }));
+  }, [telemetry]);
 
   const handleFileLoad = useCallback(async () => {
     try {
       const result = await loadFile();
-      if (!result) return;
+      if (!result) return; // user canceled — not an error, not a telemetry event
       commitGeometry(result.geometry, result.fileName);
     } catch (err) {
       console.error('File load failed:', err);
+      telemetry.send(buildEvent('model_loaded', { success: false, failureReason: 'parse_error' }));
       setState(prev => ({
         ...prev,
         errorMessage: err instanceof Error ? err.message : 'Failed to load file.',
       }));
     }
-  }, [commitGeometry]);
+  }, [commitGeometry, telemetry]);
 
   const handleLoadSample = useCallback(() => {
     try {
@@ -152,12 +172,13 @@ export default function App() {
       commitGeometry(geometry, fileName);
     } catch (err) {
       console.error('Sample load failed:', err);
+      telemetry.send(buildEvent('model_loaded', { success: false, failureReason: 'unknown' }));
       setState(prev => ({
         ...prev,
         errorMessage: err instanceof Error ? err.message : 'Failed to load sample.',
       }));
     }
-  }, [commitGeometry]);
+  }, [commitGeometry, telemetry]);
 
   /**
    * Drag-and-drop handler. We only accept a single file — dropping a
@@ -174,12 +195,13 @@ export default function App() {
       commitGeometry(result.geometry, result.fileName);
     } catch (err) {
       console.error('Drop-load failed:', err);
+      telemetry.send(buildEvent('model_loaded', { success: false, failureReason: 'parse_error' }));
       setState(prev => ({
         ...prev,
         errorMessage: err instanceof Error ? err.message : 'Failed to load dropped file.',
       }));
     }
-  }, [commitGeometry]);
+  }, [commitGeometry, telemetry]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     // Must preventDefault on *both* dragover and drop to opt out of the
@@ -228,8 +250,24 @@ export default function App() {
         generating: false,
         showOriginal: false,
       }));
+      // Telemetry: mold_generated (success). `axisUsed` lets us spot whether
+      // Z dominates (it will) or any axis is unexpectedly common — a signal
+      // about auto-detect quality and the default axis choice.
+      telemetry.send(buildEvent('mold_generated', { success: true, axisUsed: params.axis }));
     } catch (err) {
       console.error('Mold generation failed:', err);
+      // Coarse failure tagging only — the exception message may contain
+      // details we don't want to exfiltrate. 'csg_failed' covers the vast
+      // majority of cases (boolean op threw, result was empty). If we later
+      // want to distinguish non_manifold, add a typed check in the mold code
+      // and surface a distinct error class, not a message string.
+      telemetry.send(
+        buildEvent('mold_generated', {
+          success: false,
+          axisUsed: params.axis,
+          failureReason: 'csg_failed',
+        }),
+      );
       setState(prev => ({
         ...prev,
         generating: false,
@@ -242,7 +280,7 @@ export default function App() {
     state.originalGeometry, state.boundingBox,
     state.axis, state.planeOffset,
     state.wallThicknessRatio, state.clearanceRatio,
-    state.generating, generateMold,
+    state.generating, generateMold, telemetry,
   ]);
 
   const handleAutoDetect = useCallback(async () => {
@@ -258,20 +296,31 @@ export default function App() {
         planeOffset: result.offset,
         autoDetecting: false,
       }));
+      // Telemetry: plane_auto_detected (success). Compare `axisDetected`
+      // against the later `mold_generated.axisUsed` in the dashboard to
+      // estimate how often users accept vs override auto-detect.
+      telemetry.send(
+        buildEvent('plane_auto_detected', { success: true, axisDetected: result.axis }),
+      );
     } catch (err) {
       console.error('Auto-detect failed:', err);
+      telemetry.send(buildEvent('plane_auto_detected', { success: false }));
       setState(prev => ({
         ...prev,
         autoDetecting: false,
         errorMessage: err instanceof Error ? err.message : 'Auto-detect failed.',
       }));
     }
-  }, [state.originalGeometry, state.autoDetecting, autoDetectPlane]);
+  }, [state.originalGeometry, state.autoDetecting, autoDetectPlane, telemetry]);
 
   const handleExport = useCallback(async (format: 'stl' | 'obj' | '3mf') => {
     if (!state.topMold || !state.bottomMold) return;
     try {
       await exportFiles(state.topMold, state.bottomMold, state.fileName, format);
+      // Telemetry: file_exported (success only — we don't event failures here
+      // because export failures are extremely rare and the signal we actually
+      // want is "which format matters", which is the success count per format).
+      telemetry.send(buildEvent('file_exported', { format }));
     } catch (err) {
       console.error('Export failed:', err);
       setState(prev => ({
@@ -279,7 +328,7 @@ export default function App() {
         errorMessage: err instanceof Error ? err.message : 'Export failed.',
       }));
     }
-  }, [state.topMold, state.bottomMold, state.fileName, exportFiles]);
+  }, [state.topMold, state.bottomMold, state.fileName, exportFiles, telemetry]);
 
   const clearError = useCallback(() => {
     setState(prev => ({ ...prev, errorMessage: null }));

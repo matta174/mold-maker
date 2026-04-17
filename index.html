@@ -8,8 +8,15 @@
       manifold-3d compiles WebAssembly at runtime. 'unsafe-inline' on styles
       because the renderer uses inline style objects. Revisit if we add CSS-in-JS
       with nonce support or move Manifold into a Worker.
+
+      %TELEMETRY_CONNECT_SRC% is replaced at build time by the Vite plugin in
+      vite.renderer.config.ts. If VITE_TELEMETRY_HOST is unset, the placeholder
+      becomes an empty string and connect-src stays 'self' blob:, so a build
+      with no telemetry host literally cannot phone home — regardless of
+      app-level settings. Belt-and-braces against future bugs (or supply-chain
+      compromise) silently re-enabling telemetry.
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob: %TELEMETRY_CONNECT_SRC%; worker-src 'self' blob:; object-src 'none'; base-uri 'self';" />
     <title>Mold Maker</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
