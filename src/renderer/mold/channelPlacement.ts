@@ -12,6 +12,110 @@ import type { MoldEnvelope } from './moldBox';
 import { lateralAxisIndices, primaryAxisIndex } from './moldBox';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shape-aware cross-section math
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Channels (sprue + vents) are cylindrical holes drilled along the parting
+// axis. Each one needs to sit inside the mold cross-section with enough
+// material around it to avoid breaching the outer wall — otherwise the CSG
+// subtract cuts a slot through the side of the shell (visually: "pour hole
+// drilled through the side") or yields a degenerate mesh ("regenerate nukes
+// the mold").
+//
+// `clampToMoldInterior` takes a desired (latA, latB) point and pulls it
+// inward to the nearest safe location for a channel of the given radius.
+// Shape-specific:
+//   - rect / roundedRect: AABB inset by max(margin, cornerRadius).
+//   - cylinder: circle of radius (cylinderRadius - margin).
+
+export function clampToMoldInterior(
+  latA: number,
+  latB: number,
+  env: MoldEnvelope,
+  margin: number,
+): [number, number] {
+  const [latAIdx, latBIdx] = lateralAxisIndices(env.axis);
+
+  if (env.shape === 'cylinder') {
+    const cA = env.cylinderCenterLatA ?? 0;
+    const cB = env.cylinderCenterLatB ?? 0;
+    const r = env.cylinderRadius ?? 0;
+    const maxDist = Math.max(0, r - margin);
+    const dA = latA - cA;
+    const dB = latB - cB;
+    const dist = Math.sqrt(dA * dA + dB * dB);
+    if (dist <= maxDist || dist < 1e-9) return [latA, latB];
+    const scale = maxDist / dist;
+    return [cA + dA * scale, cB + dB * scale];
+  }
+
+  // rect / roundedRect: clamp to AABB. For roundedRect, inflate the margin by
+  // cornerRadius so clamped points never land in the corner-cutout region.
+  const effMargin =
+    env.shape === 'roundedRect'
+      ? Math.max(margin, env.cornerRadius ?? 0)
+      : margin;
+
+  const minA = env.moldMin.getComponent(latAIdx) + effMargin;
+  const maxA = env.moldMin.getComponent(latAIdx) + env.moldSize.getComponent(latAIdx) - effMargin;
+  const minB = env.moldMin.getComponent(latBIdx) + effMargin;
+  const maxB = env.moldMin.getComponent(latBIdx) + env.moldSize.getComponent(latBIdx) - effMargin;
+
+  // Handle degenerate cases where margin exceeds half the box: collapse to
+  // the axis-center. Caller generally shouldn't hit this — it means the
+  // channel is too big for the mold — but we'd rather return a sensible
+  // centered point than NaN or an inverted range.
+  const clampedA = maxA >= minA ? Math.min(Math.max(latA, minA), maxA)
+    : (env.moldMin.getComponent(latAIdx) + env.moldSize.getComponent(latAIdx) / 2);
+  const clampedB = maxB >= minB ? Math.min(Math.max(latB, minB), maxB)
+    : (env.moldMin.getComponent(latBIdx) + env.moldSize.getComponent(latBIdx) / 2);
+  return [clampedA, clampedB];
+}
+
+/**
+ * Shape-aware fallback seed points for vents, used when part-geometry
+ * extremities yield fewer than MIN_VENTS candidates (e.g. a simple sphere).
+ *
+ * - rect / roundedRect: the four bbox corners clamped to the mold interior
+ *   — matches the legacy behaviour.
+ * - cylinder: four cardinal points on the inscribed square (±r/√2 from the
+ *   cylinder axis), so fallback vents stay inside the circular cross-section.
+ *   The old code placed them at bbox corners, which often sit outside the
+ *   cylinder's radius, producing degenerate CSG.
+ */
+export function fallbackVentSeeds(
+  env: MoldEnvelope,
+  bbox: THREE.Box3,
+  margin: number,
+): [number, number][] {
+  const [latAIdx, latBIdx] = lateralAxisIndices(env.axis);
+
+  if (env.shape === 'cylinder') {
+    const cA = env.cylinderCenterLatA ?? 0;
+    const cB = env.cylinderCenterLatB ?? 0;
+    const r = Math.max(0, (env.cylinderRadius ?? 0) - margin);
+    // Four cardinals on the inscribed square (√2/2 ≈ 0.7071).
+    const d = r * Math.SQRT1_2;
+    return [
+      [cA + d, cB + d],
+      [cA - d, cB + d],
+      [cA - d, cB - d],
+      [cA + d, cB - d],
+    ];
+  }
+
+  // rect / roundedRect: bbox corners, then clamped to mold interior so a
+  // very thin bbox inside a large mold doesn't produce wall-piercing vents.
+  const raw: [number, number][] = [
+    [bbox.min.getComponent(latAIdx), bbox.min.getComponent(latBIdx)],
+    [bbox.max.getComponent(latAIdx), bbox.max.getComponent(latBIdx)],
+    [bbox.min.getComponent(latAIdx), bbox.max.getComponent(latBIdx)],
+    [bbox.max.getComponent(latAIdx), bbox.min.getComponent(latBIdx)],
+  ];
+  return raw.map(([a, b]) => clampToMoldInterior(a, b, env, margin));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Registration pin and sprue/vent placement
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -120,18 +224,28 @@ export function getRotationForAxis(axis: Axis): [number, number, number] {
 /**
  * Compute sprue and vent positions using geometry analysis.
  *
- * Strategy:
- * - SPRUE: Analyze the part geometry to find the thickest cross-section in the
- *   "top" half (positive side of split). Gate at the thickest point ensures
- *   material flows thick→thin, reducing shrinkage voids. For gravity casting,
- *   placing the gate high lets gravity assist the fill.
+ * Strategy (follows standard mold-design practice — see references in
+ * generateMold.ts):
+ * - SPRUE: centroid of part vertices in the "top" half (positive side of
+ *   split) — heuristic for the thickest cross-section. Gating into the
+ *   thickest section lets material flow thick→thin and keeps packing
+ *   pressure on the bulk, reducing shrinkage voids. The centroid is then
+ *   *clamped to the mold interior* so the sprue cylinder never breaches
+ *   the outer shell wall.
  *
- * - VENTS: Find the extremity vertices in the top half that are farthest from
- *   the sprue. These are where air gets trapped last. Also add vents at any
- *   local high points (vertices with high values along the split axis).
+ * - VENTS: extremity vertices in the top half that are farthest from the
+ *   sprue — where air gets trapped last. Clustered for spacing, clamped
+ *   to the mold interior, with shape-aware fallbacks if clustering yields
+ *   fewer than MIN_VENTS.
  *
  * Manifold.cylinder() creates along Z by default, so we return a rotation
  * (in degrees) to orient the holes along the correct axis.
+ *
+ * The legacy signature (bbox/axis/moldMin/moldSize) is preserved so
+ * existing callers and tests keep working; it builds a throwaway rect
+ * envelope internally. New callers should prefer
+ * `computeChannelPositionsForEnvelope`, which is shape-aware (needed for
+ * cylinder / roundedRect outer shells).
  */
 export function computeChannelPositions(
   bbox: THREE.Box3,
@@ -146,13 +260,58 @@ export function computeChannelPositions(
   ventPositions: [number, number, number][];
   rotation: [number, number, number];
 } {
+  // Synthesize a rect envelope with the given AABB. This preserves the
+  // pre-shape-awareness behaviour bit-for-bit for callers that haven't
+  // migrated to `computeChannelPositionsForEnvelope`.
+  const env: MoldEnvelope = {
+    shape: 'rect',
+    axis,
+    wallThickness: 0,
+    moldMin: moldMin.clone(),
+    moldSize: moldSize.clone(),
+  };
+  return computeChannelPositionsForEnvelope(env, bbox, splitPos, geometry, {
+    sprueMargin: 0,
+    ventMargin: 0,
+  });
+}
+
+/**
+ * Shape-aware variant of computeChannelPositions.
+ *
+ * Takes a `MoldEnvelope` (which knows whether the outer shell is rect,
+ * roundedRect, or cylinder) plus clearance margins for the sprue and vent
+ * holes. Channel lateral positions are clamped to stay inside the mold
+ * cross-section with at least `margin` of material between each hole's
+ * outer radius and the shell's outer wall.
+ *
+ * Margins should be passed as `holeRadius + safetyWall`, where safetyWall
+ * is a fraction of wallThickness (callers in generateMold.ts use 0.5× for
+ * the sprue and 0.3× for vents — aggressive enough to avoid visible
+ * breakouts on curved cylinders, mild enough to keep channels near the
+ * part's actual extremities on boxy parts).
+ */
+export function computeChannelPositionsForEnvelope(
+  env: MoldEnvelope,
+  bbox: THREE.Box3,
+  splitPos: number,
+  geometry: THREE.BufferGeometry,
+  margins: { sprueMargin: number; ventMargin: number },
+): {
+  spruePos: [number, number, number];
+  sprueHeight: number;
+  ventPositions: [number, number, number][];
+  rotation: [number, number, number];
+} {
+  const axis = env.axis;
   const center = new THREE.Vector3();
   bbox.getCenter(center);
   const bboxSize = new THREE.Vector3();
   bbox.getSize(bboxSize);
 
-  const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
-  const topFaceVal = moldMin.getComponent(axisIdx) + moldSize.getComponent(axisIdx);
+  const axisIdx = primaryAxisIndex(axis);
+  const [lateralA, lateralB] = lateralAxisIndices(axis);
+  const topFaceVal = env.moldMin.getComponent(axisIdx) + env.moldSize.getComponent(axisIdx);
   const sprueHeight = topFaceVal - splitPos;
 
   const positions = geometry.attributes.position.array;
@@ -160,11 +319,8 @@ export function computeChannelPositions(
 
   // ── Find optimal sprue position ──
   // Practical heuristic: centroid of all vertices in the top half. This
-  // naturally gravitates toward the bulk of the part.
+  // naturally gravitates toward the bulk of the part (≈ thickest section).
   let sumA = 0, sumB = 0, topCount = 0;
-
-  const lateralA = (axisIdx + 1) % 3;
-  const lateralB = (axisIdx + 2) % 3;
 
   for (let i = 0; i < vertCount; i++) {
     const splitVal = positions[i * 3 + axisIdx];
@@ -175,8 +331,14 @@ export function computeChannelPositions(
     }
   }
 
-  const centroidA = topCount > 0 ? sumA / topCount : center.getComponent(lateralA);
-  const centroidB = topCount > 0 ? sumB / topCount : center.getComponent(lateralB);
+  const rawCentroidA = topCount > 0 ? sumA / topCount : center.getComponent(lateralA);
+  const rawCentroidB = topCount > 0 ? sumB / topCount : center.getComponent(lateralB);
+
+  // Clamp the sprue lateral position so the pour hole never breaks through
+  // the shell's outer wall — the core fix for cylinder and roundedRect molds.
+  const [centroidA, centroidB] = clampToMoldInterior(
+    rawCentroidA, rawCentroidB, env, margins.sprueMargin,
+  );
 
   const spruePos: [number, number, number] = [0, 0, 0];
   spruePos[axisIdx] = splitPos;
@@ -193,7 +355,10 @@ export function computeChannelPositions(
     if (splitVal >= splitPos) {
       const a = positions[i * 3 + lateralA];
       const b = positions[i * 3 + lateralB];
-      const dist = Math.sqrt((a - centroidA) ** 2 + (b - centroidB) ** 2);
+      // Distance relative to the (pre-clamp) part-centroid — picks vertices
+      // far from the geometric bulk, where air traps actually form. Clamping
+      // happens only at the final placement step below.
+      const dist = Math.sqrt((a - rawCentroidA) ** 2 + (b - rawCentroidB) ** 2);
       ventCandidates.push({ dist, a, b });
     }
   }
@@ -207,30 +372,29 @@ export function computeChannelPositions(
   for (const candidate of ventCandidates) {
     if (ventPositions.length >= MAX_VENTS) break;
 
+    const [ca, cb] = clampToMoldInterior(candidate.a, candidate.b, env, margins.ventMargin);
+
     const tooClose = ventPositions.some(vp => {
-      const da = vp[lateralA] - candidate.a;
-      const db = vp[lateralB] - candidate.b;
+      const da = vp[lateralA] - ca;
+      const db = vp[lateralB] - cb;
       return Math.sqrt(da * da + db * db) < minVentSpacing;
     });
 
     if (!tooClose) {
       const pos: [number, number, number] = [0, 0, 0];
       pos[axisIdx] = splitPos;
-      pos[lateralA] = candidate.a;
-      pos[lateralB] = candidate.b;
+      pos[lateralA] = ca;
+      pos[lateralB] = cb;
       ventPositions.push(pos);
     }
   }
 
-  // Ensure at least MIN_VENTS vents: if clustering eliminated too many, add corners
+  // Ensure at least MIN_VENTS vents: if clustering eliminated too many, use
+  // shape-aware fallback seeds. Bbox corners would sit outside a cylinder's
+  // radius and pierce the shell wall — `fallbackVentSeeds` returns points
+  // already inside each shape's cross-section.
   if (ventPositions.length < MIN_VENTS) {
-    const corners: [number, number][] = [
-      [bbox.min.getComponent(lateralA), bbox.min.getComponent(lateralB)],
-      [bbox.max.getComponent(lateralA), bbox.max.getComponent(lateralB)],
-      [bbox.min.getComponent(lateralA), bbox.max.getComponent(lateralB)],
-      [bbox.max.getComponent(lateralA), bbox.min.getComponent(lateralB)],
-    ];
-    for (const [ca, cb] of corners) {
+    for (const [ca, cb] of fallbackVentSeeds(env, bbox, margins.ventMargin)) {
       if (ventPositions.length >= MIN_VENTS) break;
       const pos: [number, number, number] = [0, 0, 0];
       pos[axisIdx] = splitPos;
@@ -241,12 +405,7 @@ export function computeChannelPositions(
   }
 
   // Rotation to orient cylinders along the split axis (DEGREES — manifold-3d convention)
-  let rotation: [number, number, number];
-  switch (axis) {
-    case 'z': rotation = [0, 0, 0]; break;
-    case 'y': rotation = [90, 0, 0]; break;
-    case 'x': rotation = [0, 90, 0]; break;
-  }
+  const rotation = getRotationForAxis(axis);
 
   dbg(`Sprue at [${spruePos.map(v => v.toFixed(1))}], ${ventPositions.length} vents, height ${sprueHeight.toFixed(1)}`);
 

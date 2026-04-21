@@ -20,7 +20,7 @@ import {
 import {
   getRegistrationPinPositionsForEnvelope,
   getRotationForAxis,
-  computeChannelPositions,
+  computeChannelPositionsForEnvelope,
 } from './channelPlacement';
 import { computeMoldEnvelope, createMoldBoxManifold } from './moldBox';
 
@@ -193,8 +193,26 @@ export async function generateMold(
   const sprueTopRadius = sprueGateRadius * SPRUE_TOP_MULTIPLIER;
   const ventRadius = sprueGateRadius * VENT_RADIUS_RATIO;
 
-  const channels = computeChannelPositions(
-    boundingBox, axis, splitPos, moldMin, moldSize, geometry,
+  // Clearance margins: how much material must remain between each channel's
+  // outer radius and the shell's outer wall. Without these, the sprue and
+  // vents can CSG-subtract through the side of the mold — producing visible
+  // "pour hole drilled through the side" artifacts on cylinder molds, and
+  // sometimes a degenerate empty manifold after the subtract.
+  //
+  // Biased asymmetric: the sprue gets a bigger safety wall (0.5× wall) than
+  // vents (0.3× wall) because the sprue is the larger hole and the visible
+  // one — a small vent punching a tiny scar near an extremity is more
+  // forgivable than the pour spout doing the same. These ratios are
+  // empirical: large enough to avoid visible wall breakouts on curved
+  // cylinders at the default WALL_THICKNESS_RATIO, small enough that
+  // channels still land near the part's actual thickest section and
+  // extremities on typical geometry.
+  const sprueMargin = sprueTopRadius + wallThickness * 0.5;
+  const ventMargin = ventRadius + wallThickness * 0.3;
+
+  const channels = computeChannelPositionsForEnvelope(
+    envelope, boundingBox, splitPos, geometry,
+    { sprueMargin, ventMargin },
   );
 
   // Sprue: tapered cylinder — wider at pour end, narrower at cavity
