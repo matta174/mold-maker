@@ -240,9 +240,12 @@ export function createMoldBoxManifold(wasm: any, env: MoldEnvelope): any {
     );
 
     // rotate(axisFrame) — DEGREES, matches getRotationForAxis conventions in
-    // channelPlacement.ts.
+    // channelPlacement.ts. `[-90, 0, 0]` (not `[90, 0, 0]`) is what maps the
+    // default +Z cylinder axis to +Y under Manifold's right-hand X-Y-Z
+    // rotation convention; the old value placed the shell in the wrong
+    // half-space, silently producing empty molds for axis='y'.
     if (env.axis === 'x') m = m.rotate([0, 90, 0]);
-    else if (env.axis === 'y') m = m.rotate([90, 0, 0]);
+    else if (env.axis === 'y') m = m.rotate([-90, 0, 0]);
     // else axis === 'z' — already aligned.
 
     // After rotation the cylinder's base sits at origin along the rotated axis,
@@ -287,7 +290,7 @@ export function createMoldBoxManifold(wasm: any, env: MoldEnvelope): any {
   let m = cs.extrude(lengthAlongAxis);
 
   if (env.axis === 'x') m = m.rotate([0, 90, 0]);
-  else if (env.axis === 'y') m = m.rotate([90, 0, 0]);
+  else if (env.axis === 'y') m = m.rotate([-90, 0, 0]); // see cylinder branch above for why not [90,0,0]
 
   // Translate so the extruded prism matches env.moldMin.
   // Center of the prism's cross-section in world coords = center of AABB
