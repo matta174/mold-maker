@@ -131,10 +131,37 @@ export function geometryToManifold(wasm: any, geometry: THREE.BufferGeometry): a
   return Manifold.ofMesh(mesh);
 }
 
+/**
+ * Raised when a CSG operation collapses to an empty mesh. Caught and
+ * surfaced as a friendly error in the React layer (see App.tsx
+ * handleGenerate catch block). Carries a distinct name so callers can
+ * branch on it without string-matching the message.
+ */
+export class EmptyManifoldError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmptyManifoldError';
+  }
+}
+
 /** Convert a Manifold back to THREE.BufferGeometry. */
 export function manifoldToGeometry(manifold: any): THREE.BufferGeometry {
   const mesh = manifold.getMesh();
   const { vertProperties, triVerts, numProp } = mesh;
+
+  // An empty triVerts means the preceding CSG op fully collapsed the mesh —
+  // e.g. a sprue cylinder that extends past the mold's outer wall, or a
+  // parting plane positioned past the part's extent. Previously this
+  // silently produced a zero-vertex BufferGeometry that rendered as
+  // nothing, presenting as "regenerate nukes the mold" with no error.
+  // Throw a typed error so the caller can surface a useful message.
+  if (triVerts.length === 0) {
+    throw new EmptyManifoldError(
+      'Mold generation produced an empty mesh. The parting plane may be ' +
+      'past the part, the part may not be watertight, or the sprue/vent ' +
+      'channels may be too large for the mold wall thickness.',
+    );
+  }
 
   const positions = new Float32Array(triVerts.length * 3);
   for (let i = 0; i < triVerts.length; i++) {

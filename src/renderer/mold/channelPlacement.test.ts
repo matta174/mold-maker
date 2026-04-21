@@ -49,8 +49,35 @@ describe('getRotationForAxis', () => {
   it('returns rotations in DEGREES (not radians) for manifold-3d', () => {
     // 90° rotations; radians would be ~1.57
     expect(getRotationForAxis('x')).toEqual([0, 90, 0]);
-    expect(getRotationForAxis('y')).toEqual([90, 0, 0]);
+    // NOTE: -90 (not +90). Manifold rotates global X-Y-Z right-hand, so
+    // [90, 0, 0] sends +Z → −Y; we need [-90, 0, 0] to send +Z → +Y.
+    expect(getRotationForAxis('y')).toEqual([-90, 0, 0]);
     expect(getRotationForAxis('z')).toEqual([0, 0, 0]);
+  });
+
+  // Explicit regression guard: evaluate the rotation on the +Z unit vector
+  // the way Manifold would, and assert the result matches the parting axis
+  // direction. This catches future tweaks to the rotation values that
+  // silently flip the sign and place channels/shell in the wrong half.
+  it('each axis rotation maps the cylinder axis (+Z) to the corresponding +axis direction', () => {
+    // Manifold rotates in global X-then-Y-then-Z order, right-hand rule, degrees.
+    const applyManifoldRotation = (v: [number, number, number], r: [number, number, number]): [number, number, number] => {
+      const toRad = (d: number) => d * Math.PI / 180;
+      const rx = toRad(r[0]), ry = toRad(r[1]), rz = toRad(r[2]);
+      let [x, y, z] = v;
+      // Rx
+      [y, z] = [y * Math.cos(rx) - z * Math.sin(rx), y * Math.sin(rx) + z * Math.cos(rx)];
+      // Ry
+      [x, z] = [x * Math.cos(ry) + z * Math.sin(ry), -x * Math.sin(ry) + z * Math.cos(ry)];
+      // Rz
+      [x, y] = [x * Math.cos(rz) - y * Math.sin(rz), x * Math.sin(rz) + y * Math.cos(rz)];
+      return [x, y, z];
+    };
+    const approx = (v: [number, number, number]) => v.map(n => Math.round(n * 1e6) / 1e6) as [number, number, number];
+
+    expect(approx(applyManifoldRotation([0, 0, 1], getRotationForAxis('x')))).toEqual([1, 0, 0]);
+    expect(approx(applyManifoldRotation([0, 0, 1], getRotationForAxis('y')))).toEqual([0, 1, 0]);
+    expect(approx(applyManifoldRotation([0, 0, 1], getRotationForAxis('z')))).toEqual([0, 0, 1]);
   });
 });
 
@@ -99,7 +126,7 @@ describe('computeChannelPositions', () => {
     const result = computeChannelPositions(
       b, 'y', 1, new THREE.Vector3(-1, -1, -1), new THREE.Vector3(3, 4, 3), geo,
     );
-    expect(result.rotation).toEqual([90, 0, 0]);
+    expect(result.rotation).toEqual([-90, 0, 0]); // maps +Z → +Y under Manifold's right-hand X-Y-Z rotation
   });
 });
 

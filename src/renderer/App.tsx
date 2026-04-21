@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, Fragment } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 import ModelViewer from './components/ModelViewer';
@@ -17,6 +17,53 @@ import { buildEvent } from './services/telemetryEvents';
 import FirstRunTelemetryModal from './components/FirstRunTelemetryModal';
 
 export type { Axis } from './types';
+
+/**
+ * Re-aims the camera along the parting axis whenever it changes, so the
+ * "top" face of the mold (where the sprue exits) always faces the viewer.
+ * Previously the camera stayed pinned to a fixed isometric angle and the
+ * pour hole silently drew itself onto the face pointing AWAY from the
+ * camera — users reasonably concluded "there's no pour hole" or "it's
+ * coming out through the side."
+ *
+ * Preserves the user's current zoom distance (length of camera.position)
+ * so switching axis doesn't snap the view back to a default distance and
+ * undo whatever they'd orbited into. Also re-targets OrbitControls at the
+ * origin to keep pan state sane.
+ */
+function CameraRig({ axis }: { axis: Axis }) {
+  const camera = useThree(s => s.camera);
+  const controls = useThree(s => s.controls) as {
+    target?: THREE.Vector3;
+    update?: () => void;
+  } | null;
+  // Only reorient on axis change, not on every render. Otherwise any state
+  // update would snap the camera back to its canonical angle.
+  const prevAxis = useRef<Axis | null>(null);
+  useEffect(() => {
+    if (prevAxis.current === axis) return;
+    prevAxis.current = axis;
+
+    const dist = camera.position.length() || 120;
+    // Bias along +axis so the sprue-exit face of the top half is visible;
+    // smaller tilts on the two lateral axes keep depth cues intact so the
+    // view doesn't collapse to an orthographic-looking silhouette.
+    const pos: [number, number, number] = [0, 0, 0];
+    const primary = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+    pos[primary] = dist * 0.78;
+    pos[(primary + 1) % 3] = dist * 0.45;
+    pos[(primary + 2) % 3] = dist * 0.45;
+    camera.position.set(pos[0], pos[1], pos[2]);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+
+    if (controls?.target && typeof controls.update === 'function') {
+      controls.target.set(0, 0, 0);
+      controls.update();
+    }
+  }, [axis, camera, controls]);
+  return null;
+}
 
 /**
  * Snapshot of the parameters a given mold was generated with. When the current
@@ -506,6 +553,7 @@ export default function App() {
             gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
           >
             <color attach="background" args={[colors.viewportBg]} />
+            <CameraRig axis={state.axis} />
             <ambientLight intensity={0.4} />
             <directionalLight position={[10, 10, 5]} intensity={1} />
             <directionalLight position={[-5, -5, -5]} intensity={0.3} />

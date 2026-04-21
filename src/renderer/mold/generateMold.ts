@@ -215,26 +215,39 @@ export async function generateMold(
     { sprueMargin, ventMargin },
   );
 
-  // Sprue: tapered cylinder — wider at pour end, narrower at cavity
-  const sprue = Manifold.cylinder(
-    channels.sprueHeight,
-    sprueGateRadius,
-    sprueTopRadius,
-    24,
-  ).rotate(channels.rotation).translate(channels.spruePos);
+  // Guard against degenerate sprue heights. If the parting plane is pushed
+  // all the way to the top of the bbox (offset ≈ 1), sprueHeight shrinks to
+  // just wallThickness — and if it ever drops below a quarter of that, the
+  // tapered cylinder becomes numerically unstable and the subtract can
+  // collapse the top half to an empty manifold. Skip channels in that case
+  // rather than produce a useless mold. Users get a clear "move the parting
+  // plane" hint via the EmptyManifoldError surfaced from manifoldToGeometry
+  // if the split is even more extreme than that.
+  const MIN_CHANNEL_HEIGHT = wallThickness * 0.25;
+  const channelsViable = channels.sprueHeight >= MIN_CHANNEL_HEIGHT;
 
-  topResult = topResult.subtract(sprue);
-
-  // Vent holes at extremities and high points
-  for (const ventPos of channels.ventPositions) {
-    const vent = Manifold.cylinder(
+  if (channelsViable) {
+    // Sprue: tapered cylinder — wider at pour end, narrower at cavity
+    const sprue = Manifold.cylinder(
       channels.sprueHeight,
-      ventRadius,
-      ventRadius * VENT_TAPER_RATIO,
-      12,
-    ).rotate(channels.rotation).translate(ventPos);
+      sprueGateRadius,
+      sprueTopRadius,
+      24,
+    ).rotate(channels.rotation).translate(channels.spruePos);
 
-    topResult = topResult.subtract(vent);
+    topResult = topResult.subtract(sprue);
+
+    // Vent holes at extremities and high points
+    for (const ventPos of channels.ventPositions) {
+      const vent = Manifold.cylinder(
+        channels.sprueHeight,
+        ventRadius,
+        ventRadius * VENT_TAPER_RATIO,
+        12,
+      ).rotate(channels.rotation).translate(ventPos);
+
+      topResult = topResult.subtract(vent);
+    }
   }
 
   const topGeo = manifoldToGeometry(topResult);

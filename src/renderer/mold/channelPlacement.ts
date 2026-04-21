@@ -94,8 +94,12 @@ export function fallbackVentSeeds(
     const cA = env.cylinderCenterLatA ?? 0;
     const cB = env.cylinderCenterLatB ?? 0;
     const r = Math.max(0, (env.cylinderRadius ?? 0) - margin);
-    // Four cardinals on the inscribed square (√2/2 ≈ 0.7071).
-    const d = r * Math.SQRT1_2;
+    // Four cardinals on the inscribed square. A point at (r·√½, r·√½) sits
+    // EXACTLY on the safe circle of radius r, so float rounding can push it
+    // a hair outside. Shave an extra 1% off so the seeds land strictly
+    // inside the safe region — equivalent to clamping with a slightly
+    // larger margin, cheaper than a second clamp pass.
+    const d = r * Math.SQRT1_2 * 0.99;
     return [
       [cA + d, cB + d],
       [cA - d, cB + d],
@@ -212,11 +216,26 @@ export function getRegistrationPinPositionsForEnvelope(
   return positions;
 }
 
-/** Rotation (in DEGREES) to orient a default-Z cylinder along the given axis. */
+/**
+ * Rotation (in DEGREES) to orient a default-Z cylinder along the given axis.
+ *
+ * Manifold rotates in global X-Y-Z order with the right-hand rule (see
+ * manifold-3d/manifold-encapsulated-types.d.ts `rotate` docs). Tracing the
+ * local +Z unit vector through each case:
+ *   - `[0, 90, 0]`  → +X  (used for axis='x', correct)
+ *   - `[-90, 0, 0]` → +Y  (used for axis='y' — NOTE: historically [90,0,0]
+ *                         was used here, which sends +Z → −Y, silently
+ *                         placing the shell/pins/sprue in the wrong half-
+ *                         space. Only Z was well-exercised so this never
+ *                         surfaced in screenshots, but roundedRect and
+ *                         cylinder molds split along Y were effectively
+ *                         broken before this fix.)
+ *   - `[0, 0, 0]`   → +Z  (no-op, used for axis='z')
+ */
 export function getRotationForAxis(axis: Axis): [number, number, number] {
   switch (axis) {
     case 'x': return [0, 90, 0];
-    case 'y': return [90, 0, 0];
+    case 'y': return [-90, 0, 0];
     case 'z': return [0, 0, 0];
   }
 }
