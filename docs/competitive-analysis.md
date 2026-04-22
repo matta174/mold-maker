@@ -1,12 +1,12 @@
 # Competitive Analysis — Mold Maker
 
-*Last updated: 2026-04-16. This is a living document; re-run when major competitors ship features or when we ship new ones.*
+*Last updated: 2026-04-20. This is a living document; re-run when major competitors ship features or when we ship new ones.*
 
 ## TL;DR
 
-Mold Maker is a free, open-source, offline-capable two-part mold generator with auto-generated sprues, vents, and registration pins. Its **engineering bones are strong** (Manifold WASM CSG, worker-threaded generation, multi-format export, scale-relative geometry). Its **UX and feature breadth lag** the two closest web competitors — `mold.actionbox.ca` and `moldmaker.vercel.app` — which have shipped demoldability analysis, non-planar splits, STEP export, and polished onboarding that we haven't.
+Mold Maker is a free, open-source, offline-capable two-part mold generator with auto-generated sprues, vents, and registration pins. Its **engineering bones are strong** (Manifold WASM CSG, worker-threaded generation, multi-format export, scale-relative geometry). The three highest-leverage bets I called out in the first pass of this document have all shipped since launch — demoldability heatmap, exposed wall/clearance sliders, and sample-model + drag-and-drop onboarding — plus STEP export (2026-04-20), which was a Tier 2 item moved forward after the spikes de-risked the OpenCascade integration. The one big remaining gap versus `moldmaker.vercel.app` is **non-planar contour splitting**; everything else below is either parity or a feature we have that they don't (scale-to-printer presets, mold-box-shape options, oblique parting planes, 3MF export, full offline operation, zero sign-up).
 
-If I had to pick three bets that would close most of the perceived-feature gap with ~1-2 weeks of work each: **(1) draft-angle/demoldability heatmap**, **(2) exposed wall-thickness & clearance controls**, **(3) a sample model + drag-and-drop onboarding path.** Non-planar contour splitting is the biggest *impressive* gap, but also the most expensive to build well.
+If I were re-picking three bets today I'd point at: **(1) non-planar contour splitting** (still the flashiest gap, 3-5 weeks), **(2) mesh-repair affordance for non-watertight inputs** (the current hard-fail is the #1 support burden we can predict), **(3) i18n scaffolding** (opens up the global hobbyist base that's currently locked out by English-only copy). See the Recommended Top 3 section at the bottom for the updated reasoning.
 
 The open-source positioning is real and defensible. Nobody else in the two-part-mold space is open-source + offline-capable, and that combination matters to a chunk of users (privacy, air-gapped labs, education, hackability).
 
@@ -113,7 +113,7 @@ Rated: **Strong** (market-leading) / **Adequate** (functional, not differentiate
 | STL export | Strong | Strong | Strong | Strong | Strong (manual) | Strong |
 | OBJ export | Strong | Absent | Strong | Strong | Strong | Absent |
 | 3MF export | Strong (geometry) | Absent | Strong (with material/color) | Strong | Adequate | Absent |
-| STEP (.stp) export | Absent | Absent | **Strong** (OpenCascade) | Strong | Absent | Absent |
+| STEP (.stp) export | **Strong** (OpenCascade, shipped 2026-04-20) | Absent | **Strong** (OpenCascade) | Strong | Absent | Absent |
 | Per-half export | Strong | Strong | Strong | Manual | Manual | Manual |
 | Slicer-ready settings | Absent | Absent | Adequate (3MF print settings) | Absent | Absent | Absent |
 
@@ -157,15 +157,16 @@ Ranked by impact-per-effort for the current positioning. "Effort" is a rough dev
 
 ### Tier 2 — Build These Next Quarter
 
-**5. STEP (.stp) export**
+**5. STEP (.stp) export** — ✅ *Shipped 2026-04-20 (see ROADMAP).*
 - *Why it matters:* If anyone ever wants to take your mold into a real CAD tool (Fusion, SolidWorks, FreeCAD) for manual editing, or machine it on a CNC instead of printing it, STEP is the only format that preserves it as solid geometry rather than a mesh. Actionbox does this via OpenCascade; it's a pro-tier signal.
-- *Effort:* 1-2 weeks. `occt-import-js` or `opencascade.js` gives you STEP export from a manifold mesh. Integration is non-trivial — the WASM binary is large (~10MB) and you need to decide if it's opt-in or always-loaded.
-- *Honest counterpoint:* Ask whether your users actually want this before you ship it. If 90% of them are going straight to a slicer with an STL, STEP export is a wow-factor feature nobody uses. Add instrumentation before investing.
+- *Effort (as shipped):* ~5 days end-to-end, not the 1-2 weeks estimated. The spikes (OCP primitive → STEP, Manifold mesh → faceted BRep → STEP, filename-length probe) de-risked the nasty path before we wrote production code, and the faceted-shell BRep strategy turned out to be ~200 lines of exporter plus a small amount of UI + worker plumbing. The estimate was right about the WASM integration being the non-trivial part: five separate `opencascade.js` v1.1.1 quirks had to be discovered via probes (filename >10-char corruption, the five-arg `Sewing` ctor, the `Handle_Message_ProgressIndicator_1()` requirement, overload enumeration for the right constructors, and Vite's broken WASM import). See [ADR-0001](../docs/adr/0001-step-export-library.md) for the full trap list, pinned as regression tests.
+- *Binary reality check:* The ~10MB estimate was low — the OCP WASM is **65.86 MB raw / 13.98 MB gzipped**. Too big to auto-load. Decided lazy-on-first-STEP-click (see [ADR-0002](../docs/adr/0002-step-loading-strategy.md)); Vite's chunk-splitting gave us this for free via `new Worker(new URL(...))` + dynamic `import()`. Users who never click STEP pay zero bytes — the telemetry `file_exported: step` event will tell us what fraction actually use it, with a pre-committed revisit trigger (>50% → reconsider prefetch).
+- *Honest counterpoint stands:* we shipped with instrumentation, not without it. The counterpoint was right to insist on that. If two weeks of launch telemetry shows STEP is a ghost feature, pulling the 66 MB WASM out of the repo is a one-PR change.
 
-**6. Cut angle (oblique parting plane)**
+**6. Cut angle (oblique parting plane)** — ✅ *Shipped 2026-04-17 (see ROADMAP).*
 - *Why it matters:* Some geometries have zero good axis-aligned parting planes but one obvious oblique one. Moldmaker.vercel.app exposes cut angle as a parameter.
-- *Effort:* 3-5 days for the geometry; 1-2 days for the UI. The CSG code already uses a cutting-box approach; rotate the cutters by the angle instead of keeping them axis-aligned.
-- *Trap:* Once you add angle, the registration-pin placement logic has to follow. Currently `getRegistrationPinPositions` hardcodes axis-aligned corners.
+- *Effort (as shipped):* ~3-4 days. Chose Manifold's native `splitByPlane(normal, originOffset)` after a spike — cleaner than rotating cutter boxes, and roughly 30 lines shorter than the axis-aligned predecessor.
+- *Trap (confirmed real):* The registration-pin placement logic did need to follow. `channelPlacement.ts` now uses a shared signed-distance classifier to lift pins, sprue, and vents onto the tilted plane.
 
 **7. Mold box shape options (rounded-rect, cylinder)**
 - *Why it matters:* Circular parts (bottles, bowls, dials) get less material and cleaner demolding from a cylindrical mold box. OpenSCAD-era users expect this because Jason Webb's script has it. It's a cheap parity item.
@@ -222,7 +223,7 @@ The wedge against moldmaker.vercel.app is "no subscription + you own the code." 
 
 **Trend: Autodesk shutting down free tools.** Meshmixer is gone. Fusion 360's free tier has been progressively narrowed. *Posture: Lead.* This is exactly the moment to be the OSS successor. Don't be subtle about it in your README — "If you loved Meshmixer for mold prep, here's a focused alternative that won't get yanked."
 
-**Trend: STEP becoming a checkbox for prosumer 3D tools.** Once a few of your competitors have it, the absence becomes a rejection criterion. *Posture: Monitor, build in Q2/Q3.* Set a trigger: if a second free competitor ships STEP, escalate to Tier 1.
+**Trend: STEP becoming a checkbox for prosumer 3D tools.** Once a few of your competitors have it, the absence becomes a rejection criterion. *Posture (updated 2026-04-20): Shipped.* Took this off the "monitor" list and built it rather than wait for a second free competitor. Reasoning: the checkbox matters more for Show-HN / launch messaging than the gap size implied — "STEP export" turns into a single-bullet advantage, not just parity with one competitor. See ROADMAP revision history and [ADR-0001](../docs/adr/0001-step-export-library.md) / [ADR-0002](../docs/adr/0002-step-loading-strategy.md).
 
 ## Recommended Top 3 (If You Only Do Three Things)
 
