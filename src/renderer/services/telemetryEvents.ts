@@ -34,8 +34,10 @@ export type EventName =
 export type TelemetryAxis = 'x' | 'y' | 'z';
 
 /** Export format tag. Keep in sync with actual export targets in App.tsx, but
- *  again — duplicated on purpose so this file is a self-contained schema. */
-export type TelemetryExportFormat = 'stl' | 'obj' | '3mf';
+ *  again — duplicated on purpose so this file is a self-contained schema.
+ *  'step' added for the STEP-export rollout — its success-count answers the
+ *  task #27 question of "does the 66 MB OCP WASM bundle pull its weight?". */
+export type TelemetryExportFormat = 'stl' | 'obj' | '3mf' | 'step';
 
 /** Reason tag for model-load / mold-generation failures. A COARSE enum, never
  *  a free-form string — free-form error messages are the most common accidental

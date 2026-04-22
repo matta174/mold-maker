@@ -7,6 +7,11 @@ import * as THREE from 'three';
 // These are pure functions: BufferGeometry → ArrayBuffer. No Manifold/WASM
 // dependency, no DOM. That means they're safe to call from a Web Worker and
 // easy to unit-test in isolation.
+//
+// NOTE: STEP export lives in stepExporter.ts because it pulls in a 66 MB
+// OpenCascade WASM and breaks the no-WASM invariant above. It is re-exported
+// at the bottom of this file so callers have a single entry point for all
+// mesh export formats.
 
 /** Export to binary STL. */
 export function exportSTL(geometry: THREE.BufferGeometry): ArrayBuffer {
@@ -151,3 +156,13 @@ ${triangleLines.join('\n')}
     '3D/3dmodel.model': modelXml,
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP re-export
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Pulls in OpenCascade WASM on first call. Separate file so importing this
+// module doesn't transitively load OCP — only callers that actually invoke
+// exportSTEP pay the WASM-load cost.
+
+export { exportSTEP, type ExportStepOptions } from './stepExporter';
