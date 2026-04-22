@@ -1,4 +1,36 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
+// Install an in-memory localStorage mock BEFORE importing the module under test.
+// Rationale: happy-dom 15.x + Node 25.x have a nasty interaction — Node 25's
+// experimental native `localStorage` (gated on the `--localstorage-file` flag)
+// shadows happy-dom's DOM localStorage, and without the flag the native one
+// silently no-ops. The symptoms are exactly what we saw: some calls throw
+// "setItem is not a function", others "succeed" but fail to round-trip.
+//
+// This mock is environment-agnostic and sidesteps the whole mess — the module
+// under test only does runtime `typeof localStorage` checks, so swapping the
+// global here is sufficient.
+const _store = new Map<string, string>();
+const mockLocalStorage: Storage = {
+  get length() {
+    return _store.size;
+  },
+  clear: () => _store.clear(),
+  getItem: (k: string) => (_store.has(k) ? _store.get(k)! : null),
+  key: (i: number) => Array.from(_store.keys())[i] ?? null,
+  removeItem: (k: string) => {
+    _store.delete(k);
+  },
+  setItem: (k: string, v: string) => {
+    _store.set(k, String(v));
+  },
+};
+Object.defineProperty(globalThis, 'localStorage', {
+  value: mockLocalStorage,
+  writable: true,
+  configurable: true,
+});
+
 import {
   CONSENT_VERSION,
   declineConsent,
@@ -18,6 +50,10 @@ import {
  */
 describe('telemetrySettings', () => {
   beforeEach(() => {
+    // Clear the underlying store explicitly — __resetForTests() does the right
+    // thing in product code, but belt-and-braces here catches any test that
+    // stashed other keys into the same store.
+    _store.clear();
     __resetForTests();
   });
 
