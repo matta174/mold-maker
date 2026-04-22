@@ -18,6 +18,8 @@ interface HeatmapOverlayProps {
   axis: Axis;
   offset: number;
   boundingBox: THREE.Box3;
+  /** Tilt of parting plane, degrees. 0 = axis-aligned. Optional for back-compat. */
+  cutAngle?: number;
 }
 
 export default function HeatmapOverlay({
@@ -25,14 +27,15 @@ export default function HeatmapOverlay({
   axis,
   offset,
   boundingBox,
+  cutAngle = 0,
 }: HeatmapOverlayProps) {
   // Rebuild the colored geometry whenever inputs change. This is linear in
   // triangle count — ~a few ms for a 50k-face mesh — so it's fine on every
   // slider tick. If that ever becomes a bottleneck we can move it into a
   // worker or debounce here.
   const colored = useMemo(
-    () => buildDraftHeatmapGeometry(geometry, axis, offset, boundingBox),
-    [geometry, axis, offset, boundingBox],
+    () => buildDraftHeatmapGeometry(geometry, axis, offset, boundingBox, cutAngle),
+    [geometry, axis, offset, boundingBox, cutAngle],
   );
 
   // Dispose GPU buffers when the colored geometry is replaced or the

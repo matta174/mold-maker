@@ -41,6 +41,33 @@ export const MERGE_TOLERANCE = 1e-5;
 /** Exploded-view separation as fraction of max bbox extent (used in App.tsx). */
 export const EXPLODE_OFFSET_RATIO = 0.3;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature flags
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Oblique parting planes — roadmap #5.
+ *
+ * When false:
+ *   • `cutAngle` is accepted everywhere in the API for forward compat, but
+ *     the CSG, channel placement, draft analysis, and UI all behave exactly
+ *     as before (axis-aligned cuts only). Any non-zero value is silently
+ *     clamped to 0 at the edges of the pipeline. `cutAngle=0` is the only
+ *     value a user can actually produce because the slider is hidden.
+ *   • Lets us land the plumbing in small commits, ship to main, and exercise
+ *     the data-model changes via tests without exposing a half-built feature
+ *     to end users.
+ *
+ * When true:
+ *   • The Cut Angle slider is visible in the Control Panel.
+ *   • Non-zero cutAngle actually tilts the parting plane in CSG, pin
+ *     placement, sprue/vent classification, and the heatmap.
+ *
+ * Flip once all downstream code paths are implemented and verified.
+ * Search for this constant to find every gated code path.
+ */
+export const ENABLE_OBLIQUE_PLANES = true;
+
 /** Dev-only logger — gated so production builds don't spam the console. */
 const DEBUG = typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV === true;
 export const dbg = (...args: unknown[]) => { if (DEBUG) console.log(...args); };

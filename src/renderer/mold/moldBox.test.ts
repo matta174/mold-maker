@@ -5,6 +5,7 @@ import {
   primaryAxisIndex,
   pickCornerRadius,
   computeMoldEnvelope,
+  csDimsForAxis,
 } from './moldBox';
 import type { Axis } from '../types';
 
@@ -192,5 +193,61 @@ describe('computeMoldEnvelope (cylinder)', () => {
     // Lateral AABB must cover both the narrow and the wide axis
     expect(env.moldSize.x).toBeGreaterThanOrEqual(2);
     expect(env.moldSize.y).toBeGreaterThanOrEqual(20);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// csDimsForAxis — pins the cross-section axis mapping
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// This is the test that would have caught the rounded-rect rotation bug. Each
+// case asserts that after the prism is rotated into the parting-axis frame,
+// its AABB extents match the moldSize on every world axis. The test verifies
+// the *contract*; the actual rotation happens in createMoldBoxManifold and is
+// covered by repro_coasterBug.test.ts at the integration level.
+
+describe('csDimsForAxis', () => {
+  // Use distinct sizes per axis so a swap is obvious. World moldSize has
+  // X=11, Y=22, Z=33.
+  const moldSize = new THREE.Vector3(11, 22, 33);
+
+  it('axis=z: identity — csX=X, csY=Y, length=Z', () => {
+    const { csX, csY, length } = csDimsForAxis('z', moldSize);
+    expect(csX).toBe(11);
+    expect(csY).toBe(22);
+    expect(length).toBe(33);
+  });
+
+  it('axis=y: rotate(X,+90°) sends prism +Z→world -Y, prism +Y→world +Z; csX=X, csY=Z', () => {
+    // After rotate([90,0,0]):
+    //   - extrude axis (+Z) becomes -Y → world Y extent = length
+    //   - 2D X axis stays world X → csX must equal world X extent (11)
+    //   - 2D Y axis becomes world Z → csY must equal world Z extent (33)
+    const { csX, csY, length } = csDimsForAxis('y', moldSize);
+    expect(csX).toBe(11);
+    expect(csY).toBe(33);
+    expect(length).toBe(22);
+  });
+
+  it('axis=x: rotate(Y,+90°) sends prism +Z→world +X, prism +X→world -Z; csX=Z, csY=Y', () => {
+    // After rotate([0,90,0]):
+    //   - extrude axis (+Z) becomes +X → world X extent = length
+    //   - 2D X axis becomes -Z → csX must equal world Z extent (33)
+    //   - 2D Y axis stays world Y → csY must equal world Y extent (22)
+    const { csX, csY, length } = csDimsForAxis('x', moldSize);
+    expect(csX).toBe(33);
+    expect(csY).toBe(22);
+    expect(length).toBe(11);
+  });
+
+  // Sanity: regardless of axis, csX*csY*length must equal volume product.
+  // This catches any future swap that re-introduces the bug — even if the
+  // swap is "consistent" between csX and csY, the cube product is invariant.
+  it('csX × csY × length = product of moldSize components for every axis', () => {
+    const expected = moldSize.x * moldSize.y * moldSize.z;
+    for (const axis of ['x', 'y', 'z'] as Axis[]) {
+      const { csX, csY, length } = csDimsForAxis(axis, moldSize);
+      expect(csX * csY * length).toBe(expected);
+    }
   });
 });

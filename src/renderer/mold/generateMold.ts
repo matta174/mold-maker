@@ -10,12 +10,13 @@ import {
   SPRUE_TOP_MULTIPLIER,
   VENT_RADIUS_RATIO,
   VENT_TAPER_RATIO,
+  ENABLE_OBLIQUE_PLANES,
 } from './constants';
+import { clampCutAngle, getPlaneEquation } from './planeGeometry';
 import {
   getManifold,
   geometryToManifold,
   manifoldToGeometry,
-  createBox,
 } from './manifoldBridge';
 import {
   getRegistrationPinPositionsForEnvelope,
@@ -36,6 +37,21 @@ export interface GenerateMoldOptions {
   clearanceRatio?: number;
   /** Outer shell shape. Defaults to 'rect' for backwards compatibility. */
   moldBoxShape?: MoldBoxShape;
+  /**
+   * Tilt of the parting plane around its hinge axis, in degrees.
+   * 0 = axis-aligned (legacy behaviour). Range: [-30, 30]; anything
+   * outside is clamped. Defaults to 0. Ignored while
+   * ENABLE_OBLIQUE_PLANES is false — silently treated as 0.
+   */
+  cutAngle?: number;
+  /**
+   * Optional user-specified lateral sprue position. When provided, the
+   * automatic centroid-and-snap placement is skipped and the sprue is
+   * planted at these lateral coords (primary-axis coord is still lifted
+   * onto the parting plane). Cavity verification is NOT performed — the
+   * user's choice wins. See `computeChannelPositions` for full semantics.
+   */
+  sprueOverride?: { a: number; b: number };
 }
 
 /**
@@ -68,11 +84,31 @@ export async function generateMold(
   const clearanceRatio = options.clearanceRatio ?? CLEARANCE_RATIO;
   const moldBoxShape: MoldBoxShape = options.moldBoxShape ?? 'rect';
 
+  // cutAngle: accepted in the API for forward compat but force-zeroed until
+  // the feature flag flips. Once ENABLE_OBLIQUE_PLANES is true this feeds
+  // into the plane-equation helper used by the CSG / channel / heatmap paths.
+  // Clamp defensively — user-facing UI clamps too, but the worker protocol
+  // allows arbitrary values and we'd rather fail soft than CSG-fail hard.
+  const cutAngle = ENABLE_OBLIQUE_PLANES ? clampCutAngle(options.cutAngle ?? 0) : 0;
+
   // Compute actual split position
   const bboxSize = new THREE.Vector3();
   const bboxMin = boundingBox.min.clone();
   const bboxMax = boundingBox.max.clone();
   boundingBox.getSize(bboxSize);
+
+  // Defensive: a zero-extent bbox along any axis means the input is flat or
+  // malformed. Downstream code (offsetFromSplitPos, wall-thickness math) would
+  // silently treat this as "0 along that axis" and produce nonsense. Fail loud
+  // with a message the UI error path can surface verbatim rather than hiding
+  // behind a generic CSG failure later.
+  if (bboxSize.x <= 0 || bboxSize.y <= 0 || bboxSize.z <= 0) {
+    throw new Error(
+      `Cannot generate mold: input bounding box is degenerate ` +
+      `(size = [${bboxSize.x}, ${bboxSize.y}, ${bboxSize.z}]). ` +
+      `The model may be flat or malformed.`,
+    );
+  }
 
   const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
   const splitPos = bboxMin.getComponent(axisIdx) +
@@ -83,17 +119,11 @@ export async function generateMold(
   const wallThickness = maxExtent * wallThicknessRatio;
   const clearance = wallThickness * clearanceRatio;
 
-  // Cutter-plane fudge: prevents zero-size boxes when offset is exactly 0 or 1.
-  // Scale-relative so it works for models measured in microns or meters.
-  const planeEpsilon = maxExtent * 1e-6;
-
   // Mold outer envelope — shape-aware. AABB fields are still used by the
-  // axis-aligned cutters and channel placement below (they reason about the
-  // bounding region, not the shell silhouette). For non-rect shapes, the
-  // envelope's AABB is the circumscribing box of the actual shell.
+  // channel placement below (it reasons about the bounding region, not the
+  // shell silhouette). For non-rect shapes, the envelope's AABB is the
+  // circumscribing box of the actual shell.
   const envelope = computeMoldEnvelope(boundingBox, moldBoxShape, axis, wallThickness);
-  const moldSize = envelope.moldSize;
-  const moldMin = envelope.moldMin;
 
   // Convert the model to a Manifold
   let modelManifold;
@@ -110,60 +140,64 @@ export async function generateMold(
   // Subtract the model from the box to get the mold cavity
   const moldCavity = fullBox.subtract(modelManifold);
 
-  // Now split the cavity into top and bottom halves using cutting planes
-  let topCutSize: [number, number, number];
-  let topCutOffset: [number, number, number];
-  let bottomCutSize: [number, number, number];
-  let bottomCutOffset: [number, number, number];
-
-  const bigExtent = maxExtent * 2 + wallThickness * 2;
-
-  switch (axis) {
-    case 'x':
-      topCutSize = [moldMin.x + moldSize.x - splitPos + planeEpsilon, bigExtent, bigExtent];
-      topCutOffset = [splitPos, moldMin.y - bigExtent / 4, moldMin.z - bigExtent / 4];
-      bottomCutSize = [splitPos - moldMin.x + planeEpsilon, bigExtent, bigExtent];
-      bottomCutOffset = [moldMin.x, moldMin.y - bigExtent / 4, moldMin.z - bigExtent / 4];
-      break;
-    case 'y':
-      topCutSize = [bigExtent, moldMin.y + moldSize.y - splitPos + planeEpsilon, bigExtent];
-      topCutOffset = [moldMin.x - bigExtent / 4, splitPos, moldMin.z - bigExtent / 4];
-      bottomCutSize = [bigExtent, splitPos - moldMin.y + planeEpsilon, bigExtent];
-      bottomCutOffset = [moldMin.x - bigExtent / 4, moldMin.y, moldMin.z - bigExtent / 4];
-      break;
-    case 'z':
-    default:
-      topCutSize = [bigExtent, bigExtent, moldMin.z + moldSize.z - splitPos + planeEpsilon];
-      topCutOffset = [moldMin.x - bigExtent / 4, moldMin.y - bigExtent / 4, splitPos];
-      bottomCutSize = [bigExtent, bigExtent, splitPos - moldMin.z + planeEpsilon];
-      bottomCutOffset = [moldMin.x - bigExtent / 4, moldMin.y - bigExtent / 4, moldMin.z];
-      break;
-  }
-
-  const topCutter = createBox(wasm, ...topCutSize, ...topCutOffset);
-  const bottomCutter = createBox(wasm, ...bottomCutSize, ...bottomCutOffset);
-
-  // Intersect to get each half
-  const topHalf = moldCavity.intersect(topCutter);
-  const bottomHalf = moldCavity.intersect(bottomCutter);
+  // Split the cavity into top and bottom halves along the parting plane.
+  //
+  // Prior implementation: construct two giant AABB "cutter boxes" (one for
+  // each side) with a tiny planeEpsilon overlap to avoid zero-size boxes at
+  // offset=0 or 1, then intersect. That approach is impossible to extend to
+  // oblique planes without rotating the cutters — fiddly and error-prone.
+  //
+  // Current implementation: Manifold.splitByPlane(normal, originOffset)
+  // returns [above, below] directly, for any unit normal. For cutAngle=0 the
+  // plane normal is the axis unit vector and originOffset is the old splitPos,
+  // so the result is equivalent to the legacy cutter-box intersect. The
+  // "above" half is the side the normal points toward (our top half).
+  const plane = getPlaneEquation(
+    [bboxMin.x, bboxMin.y, bboxMin.z],
+    [bboxMax.x, bboxMax.y, bboxMax.z],
+    axis, offset, cutAngle,
+  );
+  const [topHalf, bottomHalf] = moldCavity.splitByPlane(
+    plane.normal as [number, number, number],
+    plane.originOffset,
+  );
 
   // Add registration pins/keys to help alignment
   const pinRadius = wallThickness * PIN_RADIUS_RATIO;
   const pinHeight = wallThickness * PIN_HEIGHT_RATIO;
-  const pinPositions = getRegistrationPinPositionsForEnvelope(envelope, boundingBox, splitPos);
+  const pinPositions = getRegistrationPinPositionsForEnvelope(envelope, boundingBox, splitPos, cutAngle);
 
   let topResult = topHalf;
   let bottomResult = bottomHalf;
 
   for (const pinPos of pinPositions) {
-    const pin = Manifold.cylinder(pinHeight, pinRadius, pinRadius, 16)
+    // Registration pins MUST span the parting plane: half inside the top
+    // mold's solid body (the `add` is a no-op there — there's already
+    // material) and half protruding into the bottom mold's region (where
+    // `add` extends the top mold by a small cylindrical nub). The bottom
+    // mold then subtracts a slightly larger clearance cylinder at the same
+    // centered position, creating a matching socket.
+    //
+    // Pre-2026-04 the cylinders were built non-centered, so pins extended
+    // entirely in the +parting-axis direction from splitPos. Both the `add`
+    // and the `subtract` were no-ops for axis='z' and axis='x' (everything
+    // happened inside the top mold's own body). Axis='y' accidentally worked
+    // because a separate rotation-direction bug flipped its cylinders into
+    // the bottom mold — fixing that bug exposed the fact that pins weren't
+    // doing anything on any axis. The `true` center flag below is the fix.
+    const pin = Manifold.cylinder(pinHeight, pinRadius, pinRadius, 16, true)
       .rotate(getRotationForAxis(axis)) // NOTE: manifold-3d's .rotate() takes DEGREES
       .translate(pinPos);
 
-    // Add pin to one half, subtract from the other
     topResult = topResult.add(pin);
     bottomResult = bottomResult.subtract(
-      Manifold.cylinder(pinHeight + clearance * 2, pinRadius + clearance, pinRadius + clearance, 16)
+      Manifold.cylinder(
+        pinHeight + clearance * 2,
+        pinRadius + clearance,
+        pinRadius + clearance,
+        16,
+        true, // centered — must match the pin it clears for
+      )
         .rotate(getRotationForAxis(axis))
         .translate(pinPos),
     );
@@ -213,6 +247,8 @@ export async function generateMold(
   const channels = computeChannelPositionsForEnvelope(
     envelope, boundingBox, splitPos, geometry,
     { sprueMargin, ventMargin },
+    cutAngle,
+    options.sprueOverride ? { sprueOverride: options.sprueOverride } : {},
   );
 
   // Guard against degenerate sprue heights. If the parting plane is pushed

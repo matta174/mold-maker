@@ -198,18 +198,69 @@ export function computeMoldEnvelope(
 const CIRCULAR_SEGMENTS = 64;
 
 /**
+ * Map the world-space mold size onto the (csX, csY, length) of a +Z-extruded
+ * prism that, after axis-rotation, will land with the right extents along the
+ * right world axes.
+ *
+ * Why this exists as a pure function: the prior implementation tried to derive
+ * `csX, csY` from `lateralAxisIndices(axis)`, which gave (primary+1, primary+2)
+ * mod 3. That assignment looks symmetric but doesn't match the rotations we
+ * actually apply — `rotate([90,0,0])` sends the prism's +Y to world +Z (not to
+ * the "next" lateral index), and `rotate([0,90,0])` sends prism +X to world -Z
+ * (also not the "next" index). So the extruded prism ended up with its sides
+ * swapped vs. the part bbox for axis='y' and axis='x'. With axis='z' the
+ * rotation is identity and the bug never surfaced — every existing integration
+ * test uses axis='z'.
+ *
+ * The rotation conventions are:
+ *
+ *   axis='z' (identity):                            (csX, csY, L) → world (X, Y, Z)
+ *   axis='y' (rotate X by -90°): (x,y,z) → (x, z, -y)
+ *                                                  (csX, csY, L) → world (X, ±Y, Z)
+ *           — Y extent of the prism is L, with the prism centered at origin
+ *             before translation. (We use -90° not +90° so cylinders extend
+ *             in +Y from base — see getRotationForAxis() in channelPlacement.)
+ *   axis='x' (rotate Y by +90°): (x,y,z) → (z, y, -x)
+ *                                                  (csX, csY, L) → world (X, Y, ±Z)
+ *
+ * So `csX` always matches the "first non-extrude axis" (in dictionary order
+ * skipping the parting axis): for axis='y' that's X, for axis='x' that's Z.
+ * `csY` is the remaining lateral. `length` is the parting-axis extent.
+ */
+export function csDimsForAxis(
+  axis: Axis,
+  moldSize: THREE.Vector3,
+): { csX: number; csY: number; length: number } {
+  if (axis === 'z') {
+    return { csX: moldSize.x, csY: moldSize.y, length: moldSize.z };
+  }
+  if (axis === 'y') {
+    return { csX: moldSize.x, csY: moldSize.z, length: moldSize.y };
+  }
+  // axis === 'x'
+  return { csX: moldSize.z, csY: moldSize.y, length: moldSize.x };
+}
+
+/**
  * Create the Manifold representing the solid outer shell of the mold (before
  * the part cavity and channels are subtracted).
  *
- * Implementation notes:
- *   - Cylinder uses Manifold.cylinder directly. Its native axis is +Z, so we
- *     translate to put its base at the correct min-Z, then rotate if the
- *     parting axis is X or Y. Rotation is in degrees (manifold-3d convention).
- *   - RoundedRect builds a 2D cross-section with CrossSection.square +
- *     offset(cornerRadius, 'Round'), then extrudes along +Z, then rotates
- *     into the parting-axis frame. We use offset rather than chaining four
- *     corner squares + circles because Clipper2's 'Round' join does the
- *     work for us cleanly.
+ * Strategy (all non-rect shapes): build the prism along +Z **centered at
+ * origin** (cylinder via the `centered` flag; roundedRect via an explicit
+ * `translate([0,0,-L/2])` after extrude), rotate into the parting-axis frame,
+ * then translate the whole thing to the envelope's AABB center. By keeping
+ * the manifold centered before rotation, we sidestep the direction-of-rotation
+ * problem entirely — the rotated prism is still centered at origin, so the
+ * final translate is just the envelope center regardless of axis.
+ *
+ * For the rect shape we keep the original cube + corner translate — there's no
+ * rotation, so the same code matches the previous behaviour byte-for-byte and
+ * is the fastest path.
+ *
+ * Implementation note on roundedRect: we build the 2D cross-section with
+ * `CrossSection.square + offset(r, 'Round')` rather than chaining four corner
+ * squares + circles because Clipper2's 'Round' join does the work cleanly and
+ * matches the Manifold idioms used elsewhere in the project.
  */
 export function createMoldBoxManifold(wasm: any, env: MoldEnvelope): any {
   const { Manifold, CrossSection } = wasm;
@@ -221,84 +272,59 @@ export function createMoldBoxManifold(wasm: any, env: MoldEnvelope): any {
     ).translate([env.moldMin.x, env.moldMin.y, env.moldMin.z]);
   }
 
+  const { csX, csY, length } = csDimsForAxis(env.axis, env.moldSize);
+
+  let m: any;
+
   if (env.shape === 'cylinder') {
     if (env.cylinderRadius === undefined) {
       throw new Error('cylinder envelope missing cylinderRadius');
     }
-    const primary = primaryAxisIndex(env.axis);
-    const lengthAlongAxis = env.moldSize.getComponent(primary);
-    const minAlongAxis = env.moldMin.getComponent(primary);
-
-    // Build the cylinder along +Z, then rotate so its axis aligns with the
-    // parting axis. Finally translate so its base sits at the correct min.
-    let m = Manifold.cylinder(
-      lengthAlongAxis,
+    // Centered cylinder: extends from z=-L/2 to z=L/2, centered in XY.
+    m = Manifold.cylinder(
+      length,
       env.cylinderRadius,
       env.cylinderRadius,
       CIRCULAR_SEGMENTS,
-      false, // not centered — base at z=0
-    );
-
-    // rotate(axisFrame) — DEGREES, matches getRotationForAxis conventions in
-    // channelPlacement.ts. `[-90, 0, 0]` (not `[90, 0, 0]`) is what maps the
-    // default +Z cylinder axis to +Y under Manifold's right-hand X-Y-Z
-    // rotation convention; the old value placed the shell in the wrong
-    // half-space, silently producing empty molds for axis='y'.
-    if (env.axis === 'x') m = m.rotate([0, 90, 0]);
-    else if (env.axis === 'y') m = m.rotate([-90, 0, 0]);
-    // else axis === 'z' — already aligned.
-
-    // After rotation the cylinder's base sits at origin along the rotated axis,
-    // centered at origin in the other two axes. Translate so its AABB matches
-    // env.moldMin/moldSize.
-    const translation: [number, number, number] = [0, 0, 0];
-    translation[primary] = minAlongAxis;
-    const [latA, latB] = lateralAxisIndices(env.axis);
-    translation[latA] = env.cylinderCenterLatA ?? 0;
-    translation[latB] = env.cylinderCenterLatB ?? 0;
-
-    return m.translate(translation);
-  }
-
-  // roundedRect
-  if (env.cornerRadius === undefined) {
-    throw new Error('roundedRect envelope missing cornerRadius');
-  }
-  const primary = primaryAxisIndex(env.axis);
-  const [latA, latB] = lateralAxisIndices(env.axis);
-  const latSizeA = env.moldSize.getComponent(latA);
-  const latSizeB = env.moldSize.getComponent(latB);
-  const lengthAlongAxis = env.moldSize.getComponent(primary);
-
-  // 2D cross-section: a rectangle of (latSizeA - 2r) × (latSizeB - 2r) inflated
-  // by r with Round joins — produces a rounded rectangle. If cornerRadius is
-  // zero or tiny, fall back to a plain square (offset(0) is a no-op).
-  const r = env.cornerRadius;
-  let cs;
-  if (r > 1e-6) {
-    const innerA = Math.max(1e-6, latSizeA - 2 * r);
-    const innerB = Math.max(1e-6, latSizeB - 2 * r);
-    cs = CrossSection.square([innerA, innerB], true).offset(
-      r, 'Round', 2, CIRCULAR_SEGMENTS,
+      true, // centered
     );
   } else {
-    cs = CrossSection.square([latSizeA, latSizeB], true);
+    // roundedRect
+    if (env.cornerRadius === undefined) {
+      throw new Error('roundedRect envelope missing cornerRadius');
+    }
+    const r = env.cornerRadius;
+    let cs;
+    if (r > 1e-6) {
+      const innerA = Math.max(1e-6, csX - 2 * r);
+      const innerB = Math.max(1e-6, csY - 2 * r);
+      cs = CrossSection.square([innerA, innerB], true).offset(
+        r, 'Round', 2, CIRCULAR_SEGMENTS,
+      );
+    } else {
+      cs = CrossSection.square([csX, csY], true);
+    }
+    // Extrude produces z∈(0, L). Shift down by L/2 so the prism is centered
+    // at the origin — matches the cylinder branch and makes the post-rotation
+    // translate axis-agnostic.
+    m = cs.extrude(length).translate([0, 0, -length / 2]);
   }
 
-  // Extrude along +Z. The resulting Manifold is centered at (0,0) in XY and
-  // extends from z=0 to z=lengthAlongAxis.
-  let m = cs.extrude(lengthAlongAxis);
-
+  // Rotate so the prism's extrude axis aligns with the parting axis. Degrees.
+  // Direction matches getRotationForAxis() in channelPlacement.ts so that the
+  // mold-box rotation and the channel/pin rotation share a single convention.
+  // (For centered prisms either ±90° gives the same AABB, but pinning the same
+  // numbers in both places keeps the convention legible.)
   if (env.axis === 'x') m = m.rotate([0, 90, 0]);
-  else if (env.axis === 'y') m = m.rotate([-90, 0, 0]); // see cylinder branch above for why not [90,0,0]
+  else if (env.axis === 'y') m = m.rotate([-90, 0, 0]);
+  // axis === 'z' — already aligned.
 
-  // Translate so the extruded prism matches env.moldMin.
-  // Center of the prism's cross-section in world coords = center of AABB
-  // perpendicular to the parting axis.
-  const translation: [number, number, number] = [0, 0, 0];
-  translation[primary] = env.moldMin.getComponent(primary);
-  translation[latA] = env.moldMin.getComponent(latA) + latSizeA / 2;
-  translation[latB] = env.moldMin.getComponent(latB) + latSizeB / 2;
-
-  return m.translate(translation);
+  // Place the (origin-centered, rotated) manifold so its center coincides with
+  // the envelope's AABB center. For cylinders, the lateral AABB center equals
+  // the cylinder center by construction in computeMoldEnvelope.
+  return m.translate([
+    env.moldMin.x + env.moldSize.x / 2,
+    env.moldMin.y + env.moldSize.y / 2,
+    env.moldMin.z + env.moldSize.z / 2,
+  ]);
 }

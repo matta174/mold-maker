@@ -28,6 +28,13 @@ export type WorkerRequest = {
     /** Normalized split offset along that axis, 0..1. */
     offset: number;
     /**
+     * Tilt of the parting plane around its hinge axis, in degrees.
+     * 0 = axis-aligned (the only value produced before oblique-planes shipped).
+     * Range: [-30, 30]. Clamped inside generateMold.
+     * Omitted → 0 (legacy behaviour).
+     */
+    cutAngle?: number;
+    /**
      * Optional tunable overrides. Omitted fields fall back to the
      * defaults in `../mold/constants`. Kept optional so older callers
      * (and the test suite) don't break when the protocol gains fields.
@@ -36,6 +43,17 @@ export type WorkerRequest = {
     clearanceRatio?: number;
     /** Outer shell shape. Omitted → 'rect' (legacy behaviour). */
     moldBoxShape?: MoldBoxShape;
+    /**
+     * User-specified lateral sprue position in the part's coordinate system.
+     * `a` and `b` are lateral coords in the axis frame: for axis='z',
+     * (a, b) = (x, y); for axis='y', (a, b) = (z, x); for axis='x',
+     * (a, b) = (y, z). Omitted → automatic placement via surface centroid.
+     *
+     * When present, cavity verification is bypassed — the mold generator
+     * respects the user's choice even if it falls in empty space. The UI
+     * is responsible for warning the user in that case.
+     */
+    sprueOverride?: { a: number; b: number };
   };
 };
 

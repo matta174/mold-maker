@@ -12,6 +12,7 @@ import { createSampleModel } from './utils/sampleModel';
 import type { Axis, MoldBoxShape } from './types';
 import { colors, radii, spacing, fontSizes, focusVisibleCss } from './theme';
 import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from './mold/constants';
+import { translateStepError } from './mold/stepExportErrors';
 import { useTelemetry } from './services/useTelemetry';
 import { buildEvent } from './services/telemetryEvents';
 import FirstRunTelemetryModal from './components/FirstRunTelemetryModal';
@@ -73,11 +74,20 @@ function CameraRig({ axis }: { axis: Axis }) {
 export interface GeneratedParams {
   axis: Axis;
   offset: number;
+  /** Cut-plane tilt around hinge axis, degrees. 0 = axis-aligned. */
+  cutAngle: number;
   wallThicknessRatio: number;
   clearanceRatio: number;
   /** Outer shell shape. Included in the staleness check — changing it must
    *  re-generate the mold, since it changes the CSG output geometry. */
   moldBoxShape: MoldBoxShape;
+  /**
+   * User-specified sprue lateral coords that were in effect at generation
+   * time, or null when auto-placement was used. Included in the staleness
+   * check so toggling the override or changing its coords forces a
+   * regenerate rather than silently leaving stale CSG on screen.
+   */
+  sprueOverride: { a: number; b: number } | null;
 }
 
 export interface AppState {
@@ -85,12 +95,30 @@ export interface AppState {
   fileName: string;
   axis: Axis;
   planeOffset: number;
+  /**
+   * Parting-plane tilt around the hinge axis, in degrees. 0 = axis-aligned.
+   * Range [-30, 30]. Only actually honoured when ENABLE_OBLIQUE_PLANES is
+   * true; otherwise it's threaded through state for forward compat but the
+   * generator treats it as 0.
+   */
+  cutAngle: number;
   /** Wall thickness as a fraction of max bbox extent. User-tunable; defaults to constants. */
   wallThicknessRatio: number;
   /** Clearance between mating surfaces as a fraction of wall thickness. User-tunable. */
   clearanceRatio: number;
   /** Outer shell shape. Defaults to 'rect'. */
   moldBoxShape: MoldBoxShape;
+  /**
+   * Sprue placement override. When `enabled` is true, `a` and `b` are used
+   * verbatim as the lateral sprue coords in the current axis's frame (see
+   * ComputeChannelOpts). When false or when the user hasn't opted in, the
+   * auto-placement centroid path runs unchanged.
+   *
+   * Why an `enabled` flag rather than just `null` → we want to retain the
+   * user's last-entered coords when they toggle auto/manual back and forth,
+   * so they don't lose the position they dialled in.
+   */
+  sprueOverride: { enabled: boolean; a: number; b: number };
   autoDetecting: boolean;
   moldGenerated: boolean;
   topMold: THREE.BufferGeometry | null;
@@ -133,9 +161,11 @@ const initialState: AppState = {
   fileName: '',
   axis: 'z',
   planeOffset: 0.5,
+  cutAngle: 0,
   wallThicknessRatio: WALL_THICKNESS_RATIO,
   clearanceRatio: CLEARANCE_RATIO,
   moldBoxShape: 'rect',
+  sprueOverride: { enabled: false, a: 0, b: 0 },
   autoDetecting: false,
   moldGenerated: false,
   topMold: null,
@@ -167,7 +197,14 @@ export default function App() {
    * one-shot modal driven by a settings value that already persists.
    */
   const [telemetryModalOpen, setTelemetryModalOpen] = useState(false);
-  const { generateMold, exportFiles, autoDetectPlane } = useMoldGenerator();
+  /**
+   * Busy indicator for STEP export specifically. Other formats finish in
+   * milliseconds so they don't need a visible state. STEP can run for ~60s
+   * total (both halves) in a worker, so the UI disables other export buttons
+   * and swaps the STEP button for a Cancel button while it's in flight.
+   */
+  const [stepExporting, setStepExporting] = useState(false);
+  const { generateMold, exportFiles, cancelStepExport, autoDetectPlane } = useMoldGenerator();
   const telemetry = useTelemetry();
 
   // ── Telemetry: session_started ──
@@ -303,12 +340,18 @@ export default function App() {
 
     // Snapshot params at call time so the result we later commit is tagged
     // with the params actually used, even if the user changes them mid-flight.
+    const activeSprueOverride = state.sprueOverride.enabled
+      ? { a: state.sprueOverride.a, b: state.sprueOverride.b }
+      : null;
+
     const params: GeneratedParams = {
       axis: state.axis,
       offset: state.planeOffset,
+      cutAngle: state.cutAngle,
       wallThicknessRatio: state.wallThicknessRatio,
       clearanceRatio: state.clearanceRatio,
       moldBoxShape: state.moldBoxShape,
+      sprueOverride: activeSprueOverride,
     };
 
     try {
@@ -321,6 +364,8 @@ export default function App() {
           wallThicknessRatio: params.wallThicknessRatio,
           clearanceRatio: params.clearanceRatio,
           moldBoxShape: params.moldBoxShape,
+          cutAngle: params.cutAngle,
+          sprueOverride: params.sprueOverride ?? undefined,
         },
       );
 
@@ -368,8 +413,9 @@ export default function App() {
     }
   }, [
     state.originalGeometry, state.boundingBox,
-    state.axis, state.planeOffset,
+    state.axis, state.planeOffset, state.cutAngle,
     state.wallThicknessRatio, state.clearanceRatio,
+    state.sprueOverride,
     state.generating, generateMold, telemetry,
   ]);
 
@@ -403,8 +449,12 @@ export default function App() {
     }
   }, [state.originalGeometry, state.autoDetecting, autoDetectPlane, telemetry]);
 
-  const handleExport = useCallback(async (format: 'stl' | 'obj' | '3mf') => {
+  const handleExport = useCallback(async (format: 'stl' | 'obj' | '3mf' | 'step') => {
     if (!state.topMold || !state.bottomMold) return;
+    // STEP runs for ~60s in a worker — flip the busy flag so the panel can
+    // disable the other formats and swap the STEP button for a Cancel button.
+    // Other formats finish in <100ms; not worth a re-render storm for them.
+    if (format === 'step') setStepExporting(true);
     try {
       // Pass the current scale. Export bakes it into the geometry so the STL
       // matches what the user sees in the viewport (where the scale is
@@ -415,15 +465,40 @@ export default function App() {
       // Telemetry: file_exported (success only — we don't event failures here
       // because export failures are extremely rare and the signal we actually
       // want is "which format matters", which is the success count per format).
+      // STEP success-count specifically answers task #27: "is the 66 MB OCP
+      // bundle pulling its weight, or should we lazy-load / split it?"
       telemetry.send(buildEvent('file_exported', { format }));
     } catch (err) {
-      console.error('Export failed:', err);
+      // 'Export cancelled' is the user's choice, not a failure — surface a
+      // gentler note (and skip the console.error noise) so it doesn't look
+      // like the app broke.
+      const isCancel = err instanceof Error && err.message === 'Export cancelled';
+      if (!isCancel) {
+        // Keep the raw error in the console for bug reports — translateStepError
+        // only shapes what the USER sees. A technical message still needs to be
+        // grep-able from a support thread.
+        console.error('Export failed:', err);
+      }
+      const raw = err instanceof Error ? err.message : 'Export failed.';
+      // Only STEP has a translation table — other exporters are fast, local,
+      // and their errors are already user-friendly ("File write failed" etc.).
+      const userFacing = format === 'step' ? translateStepError(raw) : raw;
       setState(prev => ({
         ...prev,
-        errorMessage: err instanceof Error ? err.message : 'Export failed.',
+        errorMessage: isCancel ? null : userFacing,
       }));
+    } finally {
+      if (format === 'step') setStepExporting(false);
     }
   }, [state.topMold, state.bottomMold, state.fileName, state.scale, exportFiles, telemetry]);
+
+  const handleCancelStepExport = useCallback(() => {
+    cancelStepExport();
+    // Hide the busy state immediately — the awaiter in handleExport will
+    // also flip it via finally, but the user just clicked Cancel and a
+    // 100ms gap before the button stops saying "Exporting…" looks broken.
+    setStepExporting(false);
+  }, [cancelStepExport]);
 
   const clearError = useCallback(() => {
     setState(prev => ({ ...prev, errorMessage: null }));
@@ -523,12 +598,27 @@ export default function App() {
   // OR after, when the user has moved the slider/axis away from the params the
   // current mold was generated with (so the indicator marks where the *next*
   // cut will happen, not the old one).
+  // Sprue-override staleness: the stored value in generatedParams is either
+  // null (auto mode used) or {a,b}. Compare against the currently active
+  // override (null when toggle is off) — any mismatch = stale mold.
+  const currentActiveOverride = state.sprueOverride.enabled
+    ? { a: state.sprueOverride.a, b: state.sprueOverride.b }
+    : null;
+  const sprueOverrideChanged = state.generatedParams !== null && (() => {
+    const gen = state.generatedParams.sprueOverride;
+    if (gen === null && currentActiveOverride === null) return false;
+    if (gen === null || currentActiveOverride === null) return true;
+    return gen.a !== currentActiveOverride.a || gen.b !== currentActiveOverride.b;
+  })();
+
   const paramsChanged = state.generatedParams !== null && (
     state.generatedParams.axis !== state.axis ||
     state.generatedParams.offset !== state.planeOffset ||
+    state.generatedParams.cutAngle !== state.cutAngle ||
     state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
     state.generatedParams.clearanceRatio !== state.clearanceRatio ||
-    state.generatedParams.moldBoxShape !== state.moldBoxShape
+    state.generatedParams.moldBoxShape !== state.moldBoxShape ||
+    sprueOverrideChanged
   );
   const showPartingPlaneIndicator =
     !!state.originalGeometry && !!state.boundingBox && (!state.moldGenerated || paramsChanged);
@@ -575,6 +665,7 @@ export default function App() {
                   axis={state.axis}
                   offset={state.planeOffset}
                   boundingBox={state.boundingBox}
+                  cutAngle={state.cutAngle}
                 />
               )}
 
@@ -612,6 +703,7 @@ export default function App() {
                   axis={state.axis}
                   offset={state.planeOffset}
                   boundingBox={state.boundingBox!}
+                  cutAngle={state.cutAngle}
                 />
               )}
             </group>
@@ -774,6 +866,19 @@ export default function App() {
           onLoadFile={handleFileLoad}
           onAxisChange={(axis: Axis) => setState(prev => ({ ...prev, axis }))}
           onOffsetChange={(offset: number) => setState(prev => ({ ...prev, planeOffset: offset }))}
+          onCutAngleChange={(cutAngle: number) => setState(prev => ({ ...prev, cutAngle }))}
+          onSprueOverrideToggle={(enabled: boolean) => setState(prev => ({
+            ...prev,
+            sprueOverride: { ...prev.sprueOverride, enabled },
+          }))}
+          onSprueOverrideAChange={(a: number) => setState(prev => ({
+            ...prev,
+            sprueOverride: { ...prev.sprueOverride, a },
+          }))}
+          onSprueOverrideBChange={(b: number) => setState(prev => ({
+            ...prev,
+            sprueOverride: { ...prev.sprueOverride, b },
+          }))}
           onWallThicknessChange={(wallThicknessRatio: number) =>
             setState(prev => ({ ...prev, wallThicknessRatio }))}
           onClearanceChange={(clearanceRatio: number) =>
@@ -804,6 +909,8 @@ export default function App() {
           telemetryEnabled={telemetry.settings.telemetryEnabled}
           onTelemetryAllow={telemetry.grant}
           onTelemetryDecline={telemetry.decline}
+          stepExporting={stepExporting}
+          onCancelStepExport={handleCancelStepExport}
         />
       </div>
 

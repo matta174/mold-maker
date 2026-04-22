@@ -63,6 +63,8 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         wallThicknessRatio: req.payload.wallThicknessRatio,
         clearanceRatio: req.payload.clearanceRatio,
         moldBoxShape: req.payload.moldBoxShape,
+        cutAngle: req.payload.cutAngle,
+        sprueOverride: req.payload.sprueOverride,
       },
     );
 

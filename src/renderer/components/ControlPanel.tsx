@@ -1,6 +1,7 @@
 import type { AppState } from '../App';
 import type { Axis, MoldBoxShape } from '../types';
-import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from '../mold/constants';
+import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO, ENABLE_OBLIQUE_PLANES } from '../mold/constants';
+import { MAX_CUT_ANGLE_DEGREES, hingeAxisFor } from '../mold/planeGeometry';
 import { colors, radii, spacing, fontSizes } from '../theme';
 import { PRINTER_PRESETS, getPresetById } from '../utils/printerPresets';
 import { computeFit, suggestScale, formatFitStatus } from '../utils/printerFit';
@@ -10,13 +11,29 @@ interface ControlPanelProps {
   onLoadFile: () => void;
   onAxisChange: (axis: Axis) => void;
   onOffsetChange: (offset: number) => void;
+  /** Tilt the parting plane around its hinge axis. Degrees. Gated by ENABLE_OBLIQUE_PLANES. */
+  onCutAngleChange: (cutAngle: number) => void;
+  /** Toggle custom (manual) sprue placement on/off. When off the engine
+   *  falls back to auto-placement (area-weighted surface centroid). */
+  onSprueOverrideToggle: (enabled: boolean) => void;
+  /** Update the lateral A coord of the sprue override. Units = world mm. */
+  onSprueOverrideAChange: (a: number) => void;
+  /** Update the lateral B coord of the sprue override. Units = world mm. */
+  onSprueOverrideBChange: (b: number) => void;
   onWallThicknessChange: (ratio: number) => void;
   onClearanceChange: (ratio: number) => void;
   onMoldBoxShapeChange: (shape: MoldBoxShape) => void;
   onResetDimensions: () => void;
   onGenerate: () => void;
   onAutoDetect: () => void;
-  onExport: (format: 'stl' | 'obj' | '3mf') => void;
+  onExport: (format: 'stl' | 'obj' | '3mf' | 'step') => void;
+  /** True while a STEP export is mid-flight in the worker. STEP runs ~20-30s
+   *  per half so it gets a visible busy state — the other formats finish in
+   *  milliseconds and don't need one. */
+  stepExporting: boolean;
+  /** Cancel an in-flight STEP export (terminates the worker). No-op if no
+   *  STEP export is running. */
+  onCancelStepExport: () => void;
   onToggleExplode: () => void;
   onToggleOriginal: () => void;
   onToggleHeatmap: () => void;
@@ -172,12 +189,14 @@ const styles = {
 };
 
 export default function ControlPanel({
-  state, onLoadFile, onAxisChange, onOffsetChange,
+  state, onLoadFile, onAxisChange, onOffsetChange, onCutAngleChange,
+  onSprueOverrideToggle, onSprueOverrideAChange, onSprueOverrideBChange,
   onWallThicknessChange, onClearanceChange, onMoldBoxShapeChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
   onToggleExplode, onToggleOriginal, onToggleHeatmap, onToggleWireframe, onStartOver,
   onPrinterChange, onScaleChange, onResetScale,
   telemetryConfigured, telemetryEnabled, onTelemetryAllow, onTelemetryDecline,
+  stepExporting, onCancelStepExport,
 }: ControlPanelProps) {
   const hasModel = !!state.originalGeometry;
   const hasMold = state.moldGenerated;
@@ -224,6 +243,7 @@ export default function ControlPanel({
   const paramsChanged = state.generatedParams !== null && (
     state.generatedParams.axis !== state.axis ||
     state.generatedParams.offset !== state.planeOffset ||
+    state.generatedParams.cutAngle !== state.cutAngle ||
     state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
     state.generatedParams.clearanceRatio !== state.clearanceRatio ||
     state.generatedParams.moldBoxShape !== state.moldBoxShape
@@ -298,6 +318,109 @@ export default function ControlPanel({
               aria-valuetext={`${Math.round(state.planeOffset * 100)} percent`}
             />
           </div>
+
+          {/* Cut Angle — tilts the parting plane around its hinge axis. Lets
+              users handle parts that don't split cleanly along X/Y/Z. Hidden
+              entirely when ENABLE_OBLIQUE_PLANES is false so the feature gate
+              is visible at UI level too, not just at the CSG layer. */}
+          {ENABLE_OBLIQUE_PLANES && (
+            <div style={{ marginBottom: spacing.md }}>
+              <label style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}>
+                Cut Angle: {state.cutAngle.toFixed(0)}°
+                <span style={{ color: colors.textDim, fontWeight: 400, marginLeft: spacing.xs }}>
+                  (tilts toward {hingeAxisFor(state.axis).toUpperCase()})
+                </span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={MAX_CUT_ANGLE_DEGREES}
+                step={1}
+                value={state.cutAngle}
+                onChange={e => onCutAngleChange(parseFloat(e.target.value))}
+                style={styles.slider}
+                aria-label="Cut angle in degrees"
+                aria-valuetext={`${state.cutAngle.toFixed(0)} degrees`}
+              />
+            </div>
+          )}
+
+          {/* Sprue placement override — lets the user pin the sprue at a
+              specific lateral (a, b) point in the current axis's frame. Auto
+              placement (area-weighted surface centroid + cavity-snap) stays
+              the default; opting in bypasses BOTH centroid and cavity check.
+              The engine-side `opts.sprueOverride` path respects the values
+              verbatim, so this UI owes the user visible labels for what
+              "A" and "B" mean in the current axis. */}
+          {(() => {
+            // Axis-relative lateral labels — (a, b) maps to different world
+            // axes depending on the parting axis. Keeping this derived in UI
+            // rather than trusting the user to know the mapping.
+            const latLabels: Record<Axis, [string, string]> = {
+              z: ['X', 'Y'],
+              y: ['Z', 'X'],
+              x: ['Y', 'Z'],
+            };
+            const [labelA, labelB] = latLabels[state.axis];
+            return (
+              <div style={{ marginBottom: spacing.md }}>
+                <div style={styles.toggleRow}>
+                  <span style={styles.label}>Custom sprue position</span>
+                  <ToggleSwitch
+                    active={state.sprueOverride.enabled}
+                    onClick={() => onSprueOverrideToggle(!state.sprueOverride.enabled)}
+                    label="Override sprue placement"
+                  />
+                </div>
+                {state.sprueOverride.enabled && (
+                  <div style={{ marginTop: spacing.sm, display: 'flex', gap: spacing.sm }}>
+                    <label style={{ flex: 1, fontSize: fontSizes.xs, color: colors.textDim }}>
+                      {labelA} (mm)
+                      <input
+                        type="number"
+                        step={0.5}
+                        value={state.sprueOverride.a}
+                        onChange={e => onSprueOverrideAChange(parseFloat(e.target.value) || 0)}
+                        style={{
+                          width: '100%',
+                          marginTop: spacing.xs,
+                          padding: `${spacing.xs + 2}px ${spacing.sm}px`,
+                          borderRadius: radii.sm,
+                          border: `1px solid ${colors.borderSubtle}`,
+                          background: colors.viewportBg,
+                          color: colors.textPrimary,
+                          fontSize: fontSizes.sm,
+                          fontFamily: 'inherit',
+                        }}
+                        aria-label={`Sprue lateral ${labelA} coord in millimetres`}
+                      />
+                    </label>
+                    <label style={{ flex: 1, fontSize: fontSizes.xs, color: colors.textDim }}>
+                      {labelB} (mm)
+                      <input
+                        type="number"
+                        step={0.5}
+                        value={state.sprueOverride.b}
+                        onChange={e => onSprueOverrideBChange(parseFloat(e.target.value) || 0)}
+                        style={{
+                          width: '100%',
+                          marginTop: spacing.xs,
+                          padding: `${spacing.xs + 2}px ${spacing.sm}px`,
+                          borderRadius: radii.sm,
+                          border: `1px solid ${colors.borderSubtle}`,
+                          background: colors.viewportBg,
+                          color: colors.textPrimary,
+                          fontSize: fontSizes.sm,
+                          fontFamily: 'inherit',
+                        }}
+                        aria-label={`Sprue lateral ${labelB} coord in millimetres`}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Draft analysis toggle — surfaces the demoldability heatmap so the
               user can SEE which faces won't release before running the CSG.
@@ -601,11 +724,50 @@ export default function ControlPanel({
       {hasMold && (
         <div style={styles.section}>
           <div style={styles.sectionTitle}>Export</div>
-          <div style={{ display: 'flex', gap: spacing.sm }}>
-            <button type="button" style={styles.exportBtn} onClick={() => onExport('stl')}>STL</button>
-            <button type="button" style={styles.exportBtn} onClick={() => onExport('obj')}>OBJ</button>
-            <button type="button" style={styles.exportBtn} onClick={() => onExport('3mf')}>3MF</button>
+          <div style={{ display: 'flex', gap: spacing.sm, marginBottom: spacing.sm }}>
+            <button
+              type="button"
+              style={styles.exportBtn}
+              onClick={() => onExport('stl')}
+              disabled={stepExporting}
+            >STL</button>
+            <button
+              type="button"
+              style={styles.exportBtn}
+              onClick={() => onExport('obj')}
+              disabled={stepExporting}
+            >OBJ</button>
+            <button
+              type="button"
+              style={styles.exportBtn}
+              onClick={() => onExport('3mf')}
+              disabled={stepExporting}
+            >3MF</button>
           </div>
+          {/* STEP is a full-width row on its own. It's the only exporter that
+              can take 30-60s (per-half BRep build in OCP WASM), so it owns the
+              visible busy + cancel state. Other formats are millisecond-scale
+              and just get disabled while a STEP export is running (so the user
+              can't accidentally fire a second long-running job). */}
+          {stepExporting ? (
+            <button
+              type="button"
+              style={{ ...styles.exportBtn, width: '100%' }}
+              onClick={onCancelStepExport}
+              title="Cancel STEP export"
+            >
+              Exporting STEP… (cancel)
+            </button>
+          ) : (
+            <button
+              type="button"
+              style={{ ...styles.exportBtn, width: '100%' }}
+              onClick={() => onExport('step')}
+              title="STEP / ISO 10303-21 — for CAD tools like Fusion, FreeCAD, Onshape"
+            >
+              STEP (CAD)
+            </button>
+          )}
         </div>
       )}
 
