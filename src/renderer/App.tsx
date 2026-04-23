@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
+import { useState, useCallback, useEffect, useRef, Fragment, useMemo } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
@@ -504,6 +504,43 @@ export default function App() {
     setState(prev => ({ ...prev, errorMessage: null }));
   }, []);
 
+  // Memoized params comparison. Used by both the keyboard shortcut handler
+  // and the visual parting plane indicator. Includes sprueOverrideChanged so
+  // the two stay in sync: if the user only changes sprue override position,
+  // both the indicator and keyboard shortcut recognize the mold as stale.
+  const { paramsChanged } = useMemo(() => {
+    const currentActiveOverride = state.sprueOverride.enabled
+      ? { a: state.sprueOverride.a, b: state.sprueOverride.b }
+      : null;
+    const sprueOverrideChanged = state.generatedParams !== null && (() => {
+      const gen = state.generatedParams.sprueOverride;
+      if (gen === null && currentActiveOverride === null) return false;
+      if (gen === null || currentActiveOverride === null) return true;
+      return gen.a !== currentActiveOverride.a || gen.b !== currentActiveOverride.b;
+    })();
+
+    const paramsChanged = state.generatedParams !== null && (
+      state.generatedParams.axis !== state.axis ||
+      state.generatedParams.offset !== state.planeOffset ||
+      state.generatedParams.cutAngle !== state.cutAngle ||
+      state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
+      state.generatedParams.clearanceRatio !== state.clearanceRatio ||
+      state.generatedParams.moldBoxShape !== state.moldBoxShape ||
+      sprueOverrideChanged
+    );
+
+    return { paramsChanged };
+  }, [
+    state.generatedParams,
+    state.axis,
+    state.planeOffset,
+    state.cutAngle,
+    state.wallThicknessRatio,
+    state.clearanceRatio,
+    state.moldBoxShape,
+    state.sprueOverride,
+  ]);
+
   // ── Global keyboard shortcuts ──
   // Installed once per relevant-state change. The skip-if-in-input check is
   // critical: without it, hitting "X" while focused on the plane-position
@@ -512,17 +549,28 @@ export default function App() {
   // focused.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Don't steal keystrokes from focused form controls.
       const target = e.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName;
-        if (
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'SELECT' ||
-          target.isContentEditable
-        ) return;
+      const isInput = target?.tagName === 'INPUT';
+      const inputType = isInput ? (target as HTMLInputElement).type : '';
+      const isTextInput = target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable ||
+        (isInput && ['text', 'search', 'tel', 'url', 'email', 'password', 'number'].includes(inputType));
+      const isFormControl = isTextInput || target?.tagName === 'SELECT' || isInput;
+
+      const isGenerateShortcut = (e.metaKey || e.ctrlKey) && e.key === 'Enter' && !e.altKey;
+      if (isTextInput && isGenerateShortcut) return;
+      if (isFormControl && !isGenerateShortcut) return;
+
+      if (isGenerateShortcut) {
+        const shortcutEnabled = !!state.originalGeometry && !!state.boundingBox && !state.generating &&
+          (!state.moldGenerated || paramsChanged);
+        if (shortcutEnabled) {
+          e.preventDefault();
+          handleGenerate();
+          return;
+        }
       }
+
       // Don't interfere with browser/OS chords — Cmd-R reload, Ctrl-F find, etc.
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -591,6 +639,10 @@ export default function App() {
   }, [
     shortcutHelpOpen,
     state.originalGeometry, state.generating, state.autoDetecting, state.moldGenerated,
+    state.generatedParams, state.axis, state.planeOffset, state.cutAngle,
+    state.wallThicknessRatio, state.clearanceRatio, state.moldBoxShape,
+    state.boundingBox,
+    paramsChanged,
     handleFileLoad, handleGenerate, handleAutoDetect,
   ]);
 
@@ -598,28 +650,6 @@ export default function App() {
   // OR after, when the user has moved the slider/axis away from the params the
   // current mold was generated with (so the indicator marks where the *next*
   // cut will happen, not the old one).
-  // Sprue-override staleness: the stored value in generatedParams is either
-  // null (auto mode used) or {a,b}. Compare against the currently active
-  // override (null when toggle is off) — any mismatch = stale mold.
-  const currentActiveOverride = state.sprueOverride.enabled
-    ? { a: state.sprueOverride.a, b: state.sprueOverride.b }
-    : null;
-  const sprueOverrideChanged = state.generatedParams !== null && (() => {
-    const gen = state.generatedParams.sprueOverride;
-    if (gen === null && currentActiveOverride === null) return false;
-    if (gen === null || currentActiveOverride === null) return true;
-    return gen.a !== currentActiveOverride.a || gen.b !== currentActiveOverride.b;
-  })();
-
-  const paramsChanged = state.generatedParams !== null && (
-    state.generatedParams.axis !== state.axis ||
-    state.generatedParams.offset !== state.planeOffset ||
-    state.generatedParams.cutAngle !== state.cutAngle ||
-    state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
-    state.generatedParams.clearanceRatio !== state.clearanceRatio ||
-    state.generatedParams.moldBoxShape !== state.moldBoxShape ||
-    sprueOverrideChanged
-  );
   const showPartingPlaneIndicator =
     !!state.originalGeometry && !!state.boundingBox && (!state.moldGenerated || paramsChanged);
 
