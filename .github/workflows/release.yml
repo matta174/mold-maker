@@ -88,14 +88,20 @@ jobs:
           merge-multiple: true
 
       - name: Publish GitHub Release
-        # softprops/action-gh-release auto-detects pre-release from the tag
-        # name (anything containing a dash), creates the release, and uploads
-        # every file in `files:` as an asset. Body comes from the release-notes
-        # template — edit before publishing if the auto-generated commit list
-        # isn't ideal.
+        # softprops/action-gh-release creates the release and uploads every
+        # file in `files:` as an asset. Body comes from auto-generated release
+        # notes (commits + merged PRs since the last tag). Edit the draft
+        # before publishing if the auto-content isn't ideal — for a first
+        # release in particular, hand-written notes read much better.
+        #
+        # Note on `prerelease`: action-gh-release does NOT auto-detect from
+        # tag name. We compute it explicitly — any tag with a dash (-beta.1,
+        # -rc.2, etc.) flips the prerelease flag, which keeps it out of the
+        # "Latest" slot on the Releases page.
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*.zip
           draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           fail_on_unmatched_files: true
