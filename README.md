@@ -8,6 +8,10 @@
   <em>Source-available, offline-capable, two-part mold generator for 3D printing.</em>
 </p>
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Demo: load sample model, adjust parting plane + cut angle, generate mold halves" width="900">
+</p>
+
 Load an STL or OBJ model, pick a parting plane, and export print-ready mold halves with auto-generated sprues, vents, and registration pins. Runs in your browser or as a desktop app. No signup, no cloud upload, no subscription.
 
 ## Try It Online
