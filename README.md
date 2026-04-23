@@ -5,7 +5,7 @@
 <h1 align="center">Mold Maker</h1>
 
 <p align="center">
-  <em>Open-source, offline-capable, two-part mold generator for 3D printing.</em>
+  <em>Source-available, offline-capable, two-part mold generator for 3D printing.</em>
 </p>
 
 Load an STL or OBJ model, pick a parting plane, and export print-ready mold halves with auto-generated sprues, vents, and registration pins. Runs in your browser or as a desktop app. No signup, no cloud upload, no subscription.
@@ -13,6 +13,10 @@ Load an STL or OBJ model, pick a parting plane, and export print-ready mold halv
 ## Try It Online
 
 👉 **[matta174.github.io/mold-maker](https://matta174.github.io/mold-maker/)** — no install, runs entirely in your browser (your files never leave your device).
+
+## Downloads
+
+Desktop builds for macOS, Windows, and Linux are on the [Releases page](https://github.com/matta174/mold-maker/releases). Pre-release builds are tagged as such; stable releases drop the `-beta` suffix.
 
 ## Quick Start (local dev)
 
@@ -74,3 +78,14 @@ See [ROADMAP.md](./ROADMAP.md) for what's being built next and what's explicitly
 Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for dev setup, project layout, and PR workflow. Items tagged 🌱 in the roadmap are designed for people new to the codebase.
 
 Self-hosting your own instance (with your own telemetry endpoint, or none)? See [`deploy/umami/README.md`](./deploy/umami/README.md) for the analytics deploy runbook.
+
+## License
+
+Mold Maker is licensed under the [PolyForm Noncommercial License 1.0.0](./LICENSE). This means:
+
+- **Free for personal, educational, research, and other noncommercial use.** Hobby projects, schoolwork, non-profit work, and public-benefit use are all covered.
+- **Commercial use requires a separate license.** If you're using Mold Maker as part of a business — for example, casting parts you sell, integrating it into a commercial product, or running it internally at a for-profit company — please reach out.
+
+For commercial licensing inquiries, contact **matthewc174@gmail.com**.
+
+This is a *source-available* license, not an OSI-approved open-source license. You have full access to the source code and can modify it for noncommercial use, but commercial rights are retained by the project.

@@ -1,0 +1,101 @@
+# Cross-platform desktop release pipeline.
+#
+# Triggered when a version tag is pushed (e.g. `git tag v0.1.0-beta.1 && git
+# push origin v0.1.0-beta.1`). Builds Electron Forge packages on all three
+# OSes in parallel and attaches the ZIPs to a GitHub Release.
+#
+# Why matrix over separate workflows: Electron Forge can only build for the
+# host OS. Building Linux on ubuntu, macOS on macos, Windows on windows is
+# the only way to produce correct binaries without cross-compilation toolchains.
+#
+# Pre-release detection: if the tag contains a dash (e.g. `-beta.1`, `-rc.2`),
+# softprops/action-gh-release marks the release as a pre-release automatically
+# via the `prerelease` field.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # needed to create the release and upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact-name: linux
+          - os: macos-latest
+            artifact-name: macos
+          - os: windows-latest
+            artifact-name: windows
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build packaged app
+        # `electron-forge make` respects the makers configured in
+        # forge.config.ts — currently MakerZIP for all three OSes, which
+        # produces a .zip per platform under out/make/zip/{platform}/{arch}/.
+        run: npm run make
+
+      - name: Collect artifacts
+        # MakerZIP paths vary per platform; grab every zip under out/make/
+        # and flatten into a known directory for the upload step.
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find out/make -name '*.zip' -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mold-maker-${{ matrix.artifact-name }}
+          path: release-assets/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: mold-maker-*
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        # softprops/action-gh-release auto-detects pre-release from the tag
+        # name (anything containing a dash), creates the release, and uploads
+        # every file in `files:` as an asset. Body comes from the release-notes
+        # template — edit before publishing if the auto-generated commit list
+        # isn't ideal.
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.zip
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true

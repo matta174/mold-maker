@@ -1,7 +1,7 @@
 {
   "name": "mold-maker",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.1.0-beta.1",
+  "description": "Source-available two-part mold generator for 3D printing. Load an STL/OBJ, pick a parting plane, export print-ready mold halves with auto-generated sprues, vents, and registration pins.",
   "main": ".vite/build/electron.js",
   "scripts": {
     "start": "electron-forge start",
@@ -13,9 +13,26 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "mold",
+    "3d-printing",
+    "silicone",
+    "stl",
+    "electron",
+    "three.js",
+    "manifold",
+    "csg"
+  ],
+  "author": "Matthew Compton <matthewc174@gmail.com>",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/matta174/mold-maker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/matta174/mold-maker/issues"
+  },
+  "homepage": "https://matta174.github.io/mold-maker/",
   "devDependencies": {
     "@electron-forge/cli": "^7.11.1",
     "@electron-forge/maker-zip": "^7.11.1",
