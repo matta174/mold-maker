@@ -1,0 +1,20 @@
+<svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mold Maker — two-part silicone mold generator">
+  <title>Mold Maker</title>
+  <desc>Social preview: mold-maker logo on the left, wordmark and tagline on the right.</desc>
+  <rect width="1280" height="640" fill="#fafaf9"/>
+  <g transform="translate(120 120)">
+    <circle cx="200" cy="60" r="16" fill="#f59e0b"/>
+    <rect x="28" y="76" width="344" height="144" rx="18" fill="#1f2937"/>
+    <rect x="28" y="232" width="344" height="144" rx="18" fill="#1f2937"/>
+    <line x1="12" y1="225" x2="388" y2="225" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/>
+    <rect x="58" y="216" width="13" height="18" rx="2.5" fill="#f59e0b"/>
+    <rect x="329" y="216" width="13" height="18" rx="2.5" fill="#f59e0b"/>
+    <path d="M165 110 Q165 94 181 94 L219 94 Q235 94 235 110 L235 225 L165 225 Z" fill="#f59e0b"/>
+    <path d="M165 225 L235 225 L235 340 Q235 356 219 356 L181 356 Q165 356 165 340 Z" fill="#f59e0b"/>
+  </g>
+  <g transform="translate(560 260)" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+    <text x="0" y="0" font-size="96" font-weight="500" fill="#1f2937" letter-spacing="-2">mold-maker</text>
+    <text x="0" y="52" font-size="28" fill="#64748b">Two-part silicone mold generator for 3D printing</text>
+    <text x="0" y="100" font-size="22" fill="#94a3b8" font-family="ui-monospace, 'SF Mono', Menlo, monospace">matta174.github.io/mold-maker</text>
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mold Maker">
+  <title>Mold Maker</title>
+  <desc>Two dark slate mold halves meeting at a horizontal parting line, with an amber rounded cavity impression bisected through the seam, a pour-hole dot above the top half, and registration pin ticks straddling the seam.</desc>
+  <circle cx="256" cy="76" r="20" fill="#f59e0b"/>
+  <rect x="36" y="96" width="440" height="184" rx="22" fill="#1f2937"/>
+  <rect x="36" y="296" width="440" height="184" rx="22" fill="#1f2937"/>
+  <line x1="16" y1="288" x2="496" y2="288" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  <rect x="74" y="278" width="16" height="22" rx="3" fill="#f59e0b"/>
+  <rect x="422" y="278" width="16" height="22" rx="3" fill="#f59e0b"/>
+  <path d="M211 140 Q211 120 231 120 L281 120 Q301 120 301 140 L301 288 L211 288 Z" fill="#f59e0b"/>
+  <path d="M211 288 L301 288 L301 436 Q301 456 281 456 L231 456 Q211 456 211 436 Z" fill="#f59e0b"/>
+</svg>

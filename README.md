@@ -1,6 +1,14 @@
-# Mold Maker
+<p align="center">
+  <img src="assets/logo/logo-256.png" alt="Mold Maker logo" width="128" height="128">
+</p>
 
-Open-source, offline-capable, two-part mold generator for 3D printing. Load an STL or OBJ model, pick a parting plane, and export print-ready mold halves with auto-generated sprues, vents, and registration pins. Runs in your browser or as a desktop app. No signup, no cloud upload, no subscription.
+<h1 align="center">Mold Maker</h1>
+
+<p align="center">
+  <em>Open-source, offline-capable, two-part mold generator for 3D printing.</em>
+</p>
+
+Load an STL or OBJ model, pick a parting plane, and export print-ready mold halves with auto-generated sprues, vents, and registration pins. Runs in your browser or as a desktop app. No signup, no cloud upload, no subscription.
 
 ## Try It Online
 

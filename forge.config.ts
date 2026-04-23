@@ -15,6 +15,10 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // Electron-packager picks the platform-appropriate extension automatically:
+    // icon.icns on macOS, icon.ico on Windows, icon.png on Linux. Provide the
+    // base path without extension and it resolves per platform.
+    icon: 'assets/logo/icon',
   },
   rebuildConfig: {},
   makers: [new MakerZIP({}, ['darwin', 'linux', 'win32'])],
