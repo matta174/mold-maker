@@ -261,7 +261,7 @@ export default function ControlPanel({
     <aside style={styles.panel} aria-label="Controls">
       <div>
         <div style={styles.title}>Mold Maker</div>
-        <div style={styles.subtitle}>Open-source two-part mold generator</div>
+        <div style={styles.subtitle}>Two-part mold generator for 3D printing</div>
       </div>
 
       {/* File Section */}

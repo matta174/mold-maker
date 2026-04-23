@@ -11,56 +11,106 @@ Reddit's self-promo rules are strict and subreddit-specific. Read each sub's rul
 **Title:**
 
 ```
-I built a free, open-source two-part mold generator that runs in your browser — feedback welcome
+I built a free two-part mold generator for 3D printing — feedback welcome
 ```
 
 **Body:**
 
 ```
-Been frustrated for a while that the good mold-prep tools are either
-behind paywalls or do weird things like silently rescaling your model.
-Spent the last few months building an alternative:
+I got tired of the good mold-prep tools being either behind paywalls or
+doing weird things like silently rescaling your model to fit whatever
+default build plate the author uses. Spent the last few months building
+an alternative:
 
 → Load an STL or OBJ
-→ Pick a parting plane or auto-detect one
-→ Get two print-ready mold halves with sprues, vents, and registration pins
-→ Export as STL, OBJ, or 3MF
+→ Pick a parting plane or auto-detect one (now with a 0-45° cut-angle
+  slider for parts that don't split cleanly along X/Y/Z)
+→ Get two print-ready mold halves with sprues, vents, and registration
+  pins
+→ Export as STL, OBJ, 3MF, or STEP (for CNC workflows)
+
+What it generates: a rigid two-part shell you 3D print. Pour your casting
+material (resin, wax, plaster, or silicone) directly into the cavity.
+It's NOT a silicone mold generator — you can't print silicone from a
+normal 3D printer. (A matrix-mold mode where the shell wraps around
+a silicone inner is on the roadmap — feedback from r/ResinCasting
+pointed me in that direction.)
 
 Runs entirely in your browser (your files never upload anywhere) or as
-a desktop app. Free, open-source (MIT), no account needed.
+a Windows/macOS/Linux desktop app. Free for hobby and personal use under
+a source-available license (PolyForm Noncommercial); commercial use
+requires a license from me — email in the repo.
 
-Heatmap view highlights undercuts per-face before generation, so you can
-spot demolding problems without running the CSG first. That's the feature
-I'm most curious whether people actually find useful — it's the one I keep
-reaching for on my own prints.
+Heatmap view highlights undercuts per-face before generation, so you
+can spot demolding problems without running the CSG first. That's the
+feature I reach for most on my own prints.
 
 Try it: https://matta174.github.io/mold-maker/
+Desktop downloads: https://github.com/matta174/mold-maker/releases
 Code: https://github.com/matta174/mold-maker
 
 What I'd really appreciate: if you try it on one of your own models and
-it fails or does something unexpected, tell me. I need real-world STLs
-hitting it to find the edge cases my procedural test models miss.
+it fails or does something unexpected, tell me. Real-world STLs finding
+edge cases my procedural test models miss is the single most useful
+thing anyone can give me right now.
 
 Happy to answer questions about the tech stack (React + Three.js +
-Manifold WASM) or the design decisions in the comments.
+Manifold WASM + OpenCascade WASM for STEP) or the design decisions in
+the comments.
 ```
 
-**Why this framing:** leads with a relatable grievance, describes what it does in 4 bullet points (r/3Dprinting is skim-heavy), ends with an ask for help rather than a pitch. The specific ask ("try it on your own models") gives people a reason to engage beyond upvote/ignore.
+**Why this framing:** leads with a relatable grievance, describes what it does in 4 bullet points (r/3Dprinting is skim-heavy), gets ahead of the terminology criticism by explicitly saying "not a silicone mold generator" (a v0.1 mistake I'm not repeating), ends with an ask for help rather than a pitch. The "try it on your own models" ask gives people a reason to engage beyond upvote/ignore.
 
 ---
 
 ## r/ResinCasting (target: ~50k members, smaller but this is literally the audience)
 
-**Body:**
+**Note — v0.1 post already happened on 2026-04-23.** A professional caster gave four specific points of feedback that reshaped the roadmap ([see ROADMAP.md revision history for 2026-04-23](../../ROADMAP.md#revision-history)). If posting this sub again, LEAD with what changed as a result of that thread — r/ResinCasting respects "I listened and shipped" more than "here's a tool" on a second pass.
+
+**Body (for a hypothetical second post, post-fixes):**
 
 ```
-Casters of r/ResinCasting — I've been building a free open-source tool
-for generating two-part molds from 3D models, and I'd love input from
-people who actually cast for a living or hobby.
+Update from my v0.1 post earlier — a caster in this sub pointed out
+that (1) calling the tool a "silicone mold generator" was wrong, (2)
+percent-based clearance doesn't match how anyone actually thinks about
+this, (3) putting N vents at bbox extremities is the wrong algorithm
+(vents go at cavity ceiling local maxima), and (4) the real useful
+feature is a matrix/mother mold generator that wraps a silicone
+inner, not the rigid-shell-only thing I'd built.
+
+Shipping updates so far:
+- Terminology fixed everywhere (README, landing page, social preview)
+- Absolute-mm units now on the roadmap as the next patch (issue #N)
+- Topology-based vent placement on the roadmap as a v0.2 feature
+- Matrix-mold generator added as a future alternative output mode
+
+If you've got time to poke it again, I'd want to know:
+- Once the mm-based clearance slider ships, what's your default for
+  pin-hole fit in FDM?
+- For the matrix-mold mode scoping: do you want the shell to be a
+  "bolt-together box with a mouth," a "clamshell with flanges," or
+  something else entirely?
+
+Live: https://matta174.github.io/mold-maker/
+Code: https://github.com/matta174/mold-maker (issues are open)
+```
+
+**Why this framing:** "I listened" posts do much better than "I built" posts in small craft subs. Names the commenter's four points explicitly so they (and similar readers) see their feedback got turned into real roadmap changes.
+
+---
+
+## v0.1 original post — superseded, kept for reference
+
+Original draft body — posted 2026-04-23 on r/ResinCasting. Terminology ("open-source," "silicone mold generator") was wrong; feedback on it reshaped the roadmap. Don't re-post verbatim.
+
+```
+Casters of r/ResinCasting — I've been building a free source-available
+tool for generating two-part molds from 3D models, and I'd love input
+from people who actually cast for a living or hobby.
 
 The workflow is: load a 3D model (STL/OBJ) → pick a parting plane → get
-two mold halves with auto-generated sprue, vents, and registration pins
-→ print the halves and cast as normal.
+two rigid mold halves with auto-generated sprue, vents, and registration
+pins → print the halves and cast as normal.
 
 A few things I've been unsure about that I'd like input on:
 - Default clearance between pin and hole. I settled on a percentage of
@@ -77,8 +127,6 @@ Source: https://github.com/matta174/mold-maker
 Trying to get the defaults right before adding features. If you try it
 and it gives you something useless, I want to know why.
 ```
-
-**Why this framing:** asks specific questions where the audience knows more than the author. r/ResinCasting respects genuine craft questions and dislikes "check out my app" drops.
 
 ---
 
