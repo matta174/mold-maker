@@ -1,6 +1,6 @@
 import type { AppState } from '../App';
 import type { Axis, MoldBoxShape } from '../types';
-import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO, ENABLE_OBLIQUE_PLANES } from '../mold/constants';
+import { WALL_THICKNESS_RATIO, CLEARANCE_MM, SPRUE_DIAMETER_MM, ENABLE_OBLIQUE_PLANES } from '../mold/constants';
 import { MAX_CUT_ANGLE_DEGREES, hingeAxisFor } from '../mold/planeGeometry';
 import { colors, radii, spacing, fontSizes } from '../theme';
 import { PRINTER_PRESETS, getPresetById } from '../utils/printerPresets';
@@ -21,7 +21,10 @@ interface ControlPanelProps {
   /** Update the lateral B coord of the sprue override. Units = world mm. */
   onSprueOverrideBChange: (b: number) => void;
   onWallThicknessChange: (ratio: number) => void;
-  onClearanceChange: (ratio: number) => void;
+  /** Clearance between mating surfaces in absolute mm (roadmap #13). */
+  onClearanceChange: (clearanceMm: number) => void;
+  /** Sprue top-diameter in absolute mm (roadmap #13). */
+  onSprueDiameterChange: (sprueDiameterMm: number) => void;
   onMoldBoxShapeChange: (shape: MoldBoxShape) => void;
   onResetDimensions: () => void;
   onGenerate: () => void;
@@ -56,16 +59,23 @@ interface ControlPanelProps {
   onTelemetryDecline: () => void;
 }
 
-// Slider bounds for the new mold-dimension controls.
-// - Wall thickness: 3% floor because thinner walls risk CSG failures / paper
-//   walls. 20% ceiling because beyond that the mold is wasteful bulk.
-// - Clearance: 1% floor because 0 would fuse the halves. 15% ceiling because
-//   beyond that registration pins wobble too loose to be useful.
+// Slider bounds for the mold-dimension controls.
+// - Wall thickness: still ratio-based (it's the scaffold for a dozen derived
+//   values — see constants.ts). 3% floor / 20% ceiling as before.
+// - Clearance: ABSOLUTE mm (roadmap #13). 0.05 mm floor (too tight to demold
+//   below that), 1.0 mm ceiling (beyond that pins wobble). Step = 0.05 mm.
+// - Sprue diameter: ABSOLUTE mm top-diameter (roadmap #13). 4 mm floor (below
+//   that the pour is impractical for a hand-held bottle), 25 mm ceiling
+//   (beyond that you're wasting material and the sprue dominates the mold).
 const WALL_THICKNESS_MIN = 0.03;
 const WALL_THICKNESS_MAX = 0.20;
-const CLEARANCE_MIN = 0.01;
-const CLEARANCE_MAX = 0.15;
 const RATIO_STEP = 0.005;
+const CLEARANCE_MIN_MM = 0.05;
+const CLEARANCE_MAX_MM = 1.0;
+const CLEARANCE_STEP_MM = 0.05;
+const SPRUE_DIAMETER_MIN_MM = 4;
+const SPRUE_DIAMETER_MAX_MM = 25;
+const SPRUE_DIAMETER_STEP_MM = 0.5;
 
 const styles = {
   panel: {
@@ -191,7 +201,7 @@ const styles = {
 export default function ControlPanel({
   state, onLoadFile, onAxisChange, onOffsetChange, onCutAngleChange,
   onSprueOverrideToggle, onSprueOverrideAChange, onSprueOverrideBChange,
-  onWallThicknessChange, onClearanceChange, onMoldBoxShapeChange, onResetDimensions,
+  onWallThicknessChange, onClearanceChange, onSprueDiameterChange, onMoldBoxShapeChange, onResetDimensions,
   onGenerate, onAutoDetect, onExport,
   onToggleExplode, onToggleOriginal, onToggleHeatmap, onToggleWireframe, onStartOver,
   onPrinterChange, onScaleChange, onResetScale,
@@ -232,7 +242,8 @@ export default function ControlPanel({
   // clicking it does nothing.
   const dimensionsAtDefaults =
     state.wallThicknessRatio === WALL_THICKNESS_RATIO &&
-    state.clearanceRatio === CLEARANCE_RATIO &&
+    state.clearanceMm === CLEARANCE_MM &&
+    state.sprueDiameterMm === SPRUE_DIAMETER_MM &&
     state.moldBoxShape === 'rect';
 
   // Compare current params against the params used for the last successful
@@ -245,7 +256,8 @@ export default function ControlPanel({
     state.generatedParams.offset !== state.planeOffset ||
     state.generatedParams.cutAngle !== state.cutAngle ||
     state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
-    state.generatedParams.clearanceRatio !== state.clearanceRatio ||
+    state.generatedParams.clearanceMm !== state.clearanceMm ||
+    state.generatedParams.sprueDiameterMm !== state.sprueDiameterMm ||
     state.generatedParams.moldBoxShape !== state.moldBoxShape
   );
 
@@ -537,18 +549,35 @@ export default function ControlPanel({
 
           <div>
             <label style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}>
-              Clearance: {Math.round(state.clearanceRatio * 1000) / 10}% of wall thickness
+              Clearance: {state.clearanceMm.toFixed(2)} mm
             </label>
             <input
               type="range"
-              min={CLEARANCE_MIN}
-              max={CLEARANCE_MAX}
-              step={RATIO_STEP}
-              value={state.clearanceRatio}
+              min={CLEARANCE_MIN_MM}
+              max={CLEARANCE_MAX_MM}
+              step={CLEARANCE_STEP_MM}
+              value={state.clearanceMm}
               onChange={e => onClearanceChange(parseFloat(e.target.value))}
               style={styles.slider}
-              aria-label="Clearance between mold halves"
-              aria-valuetext={`${Math.round(state.clearanceRatio * 1000) / 10} percent of wall thickness`}
+              aria-label="Clearance between mold halves in millimetres"
+              aria-valuetext={`${state.clearanceMm.toFixed(2)} millimetres`}
+            />
+          </div>
+
+          <div>
+            <label style={{ ...styles.label, marginBottom: spacing.xs, display: 'block' }}>
+              Sprue diameter: {state.sprueDiameterMm.toFixed(1)} mm
+            </label>
+            <input
+              type="range"
+              min={SPRUE_DIAMETER_MIN_MM}
+              max={SPRUE_DIAMETER_MAX_MM}
+              step={SPRUE_DIAMETER_STEP_MM}
+              value={state.sprueDiameterMm}
+              onChange={e => onSprueDiameterChange(parseFloat(e.target.value))}
+              style={styles.slider}
+              aria-label="Sprue pour-opening diameter in millimetres"
+              aria-valuetext={`${state.sprueDiameterMm.toFixed(1)} millimetres`}
             />
           </div>
         </div>

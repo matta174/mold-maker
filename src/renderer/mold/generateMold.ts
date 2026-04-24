@@ -2,11 +2,10 @@ import * as THREE from 'three';
 import type { Axis, MoldBoxShape } from '../types';
 import {
   WALL_THICKNESS_RATIO,
-  CLEARANCE_RATIO,
+  CLEARANCE_MM,
+  SPRUE_DIAMETER_MM,
   PIN_RADIUS_RATIO,
   PIN_HEIGHT_RATIO,
-  EST_WALL_THICKNESS_RATIO,
-  SPRUE_GATE_TO_WALL,
   SPRUE_TOP_MULTIPLIER,
   VENT_RADIUS_RATIO,
   VENT_TAPER_RATIO,
@@ -33,8 +32,16 @@ import { computeMoldEnvelope, createMoldBoxManifold } from './moldBox';
 export interface GenerateMoldOptions {
   /** Wall thickness as a fraction of max bbox extent. Defaults to WALL_THICKNESS_RATIO. */
   wallThicknessRatio?: number;
-  /** Clearance between mating surfaces as a fraction of wall thickness. Defaults to CLEARANCE_RATIO. */
-  clearanceRatio?: number;
+  /** Clearance between mating surfaces in absolute mm. Defaults to CLEARANCE_MM.
+   *  Roadmap #13 swapped this from a ratio-of-wall-thickness to absolute mm so
+   *  casters can dial known-good values (e.g. 0.15 mm FDM tight-fit, 0.05 mm
+   *  resin tight-fit) without having them silently rescale with model size. */
+  clearanceMm?: number;
+  /** Sprue top-diameter in absolute mm. Defaults to SPRUE_DIAMETER_MM. The
+   *  cavity end (gate) radius is derived via SPRUE_TOP_MULTIPLIER (2:1 taper),
+   *  so the user sees one number — the pour-opening diameter — and the
+   *  narrower gate end scales with it. */
+  sprueDiameterMm?: number;
   /** Outer shell shape. Defaults to 'rect' for backwards compatibility. */
   moldBoxShape?: MoldBoxShape;
   /**
@@ -81,7 +88,8 @@ export async function generateMold(
   // nonsensical for wall thickness but we let downstream CSG fail loudly
   // rather than hide the bad input here.
   const wallThicknessRatio = options.wallThicknessRatio ?? WALL_THICKNESS_RATIO;
-  const clearanceRatio = options.clearanceRatio ?? CLEARANCE_RATIO;
+  const clearanceMm = options.clearanceMm ?? CLEARANCE_MM;
+  const sprueDiameterMm = options.sprueDiameterMm ?? SPRUE_DIAMETER_MM;
   const moldBoxShape: MoldBoxShape = options.moldBoxShape ?? 'rect';
 
   // cutAngle: accepted in the API for forward compat but force-zeroed until
@@ -114,10 +122,11 @@ export async function generateMold(
   const splitPos = bboxMin.getComponent(axisIdx) +
     (bboxMax.getComponent(axisIdx) - bboxMin.getComponent(axisIdx)) * offset;
 
-  // Wall thickness and clearance (scale-relative, not absolute)
+  // Wall thickness is scale-relative (still a ratio — see constants.ts for
+  // why it stays ratio-based). Clearance is ABSOLUTE mm (roadmap #13).
   const maxExtent = Math.max(bboxSize.x, bboxSize.y, bboxSize.z);
   const wallThickness = maxExtent * wallThicknessRatio;
-  const clearance = wallThickness * clearanceRatio;
+  const clearance = clearanceMm;
 
   // Mold outer envelope — shape-aware. AABB fields are still used by the
   // channel placement below (it reasons about the bounding region, not the
@@ -222,9 +231,13 @@ export async function generateMold(
   // SIZING: Sprue gate ~1.5x estimated wall thickness. Vents much smaller
   //   (enough for air, not material leakage). Sprue tapers wider at top.
 
-  const estWallThickness = Math.min(bboxSize.x, bboxSize.y, bboxSize.z) * EST_WALL_THICKNESS_RATIO;
-  const sprueGateRadius = Math.max(estWallThickness * SPRUE_GATE_TO_WALL, wallThickness * 0.25);
-  const sprueTopRadius = sprueGateRadius * SPRUE_TOP_MULTIPLIER;
+  // Sprue sizing — roadmap #13 switched from wall-thickness-derived to an
+  // absolute user-configurable top diameter. SPRUE_TOP_MULTIPLIER still
+  // governs the gate-to-top taper (narrower at the cavity to reduce material
+  // waste and aid mold release). The tiny safety minimum protects against a
+  // user dragging the slider to 0 and producing a zero-radius cylinder.
+  const sprueTopRadius = Math.max(sprueDiameterMm / 2, 1.0);
+  const sprueGateRadius = sprueTopRadius / SPRUE_TOP_MULTIPLIER;
   const ventRadius = sprueGateRadius * VENT_RADIUS_RATIO;
 
   // Clearance margins: how much material must remain between each channel's

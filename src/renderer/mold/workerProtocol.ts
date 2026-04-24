@@ -40,7 +40,18 @@ export type WorkerRequest = {
      * (and the test suite) don't break when the protocol gains fields.
      */
     wallThicknessRatio?: number;
-    clearanceRatio?: number;
+    /**
+     * Clearance between mating surfaces in absolute mm. Replaced the prior
+     * `clearanceRatio` (percent-of-wall-thickness) in roadmap #13 — see
+     * CLEARANCE_MM in constants.ts for the rationale.
+     */
+    clearanceMm?: number;
+    /**
+     * Sprue top-diameter in absolute mm. Drives `sprueTopRadius` directly;
+     * the gate radius is derived by dividing by SPRUE_TOP_MULTIPLIER (2:1
+     * taper). Omitted → SPRUE_DIAMETER_MM default.
+     */
+    sprueDiameterMm?: number;
     /** Outer shell shape. Omitted → 'rect' (legacy behaviour). */
     moldBoxShape?: MoldBoxShape;
     /**

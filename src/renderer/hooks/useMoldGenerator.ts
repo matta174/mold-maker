@@ -102,7 +102,10 @@ export function useMoldGenerator() {
       offset: number,
       options: {
         wallThicknessRatio?: number;
-        clearanceRatio?: number;
+        /** Clearance between mating surfaces in absolute mm (roadmap #13). */
+        clearanceMm?: number;
+        /** Sprue top-diameter in absolute mm (roadmap #13). */
+        sprueDiameterMm?: number;
         moldBoxShape?: MoldBoxShape;
         /** Tilt of parting plane around hinge axis, degrees. 0 = axis-aligned. */
         cutAngle?: number;
@@ -138,7 +141,8 @@ export function useMoldGenerator() {
           offset,
           cutAngle: options.cutAngle,
           wallThicknessRatio: options.wallThicknessRatio,
-          clearanceRatio: options.clearanceRatio,
+          clearanceMm: options.clearanceMm,
+          sprueDiameterMm: options.sprueDiameterMm,
           moldBoxShape: options.moldBoxShape,
           sprueOverride: options.sprueOverride,
         },

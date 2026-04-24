@@ -8,21 +8,36 @@
 // or the wall thickness. They are NOT absolute millimetre values.
 //
 
-/** Wall thickness as a fraction of max bbox extent. */
+/** Wall thickness as a fraction of max bbox extent. Kept ratio-based because
+ *  it's the scaffold that pin radius, pin inset, sprue margin, vent margin,
+ *  and a handful of other tunables are derived from. Switching it to absolute
+ *  mm would cascade through a dozen dependents; that's a separate refactor.
+ */
 export const WALL_THICKNESS_RATIO = 0.08;
-/** Clearance (slop between mating surfaces) as a fraction of wall thickness. */
-export const CLEARANCE_RATIO = 0.05;
+
+/** Default clearance between mating surfaces, in mm. Changed from ratio-of-
+ *  wall-thickness (roadmap #13) because casters think in absolute mm and reuse
+ *  known-good values across models — scaling clearance with model size was a
+ *  programmer's abstraction, not a user's mental model. 0.15 mm is the common
+ *  FDM tight-fit clearance (loose enough to demold, tight enough to register).
+ *  Users can dial to 0.05 mm for resin prints or 1.0 mm for rough clearance. */
+export const CLEARANCE_MM = 0.15;
+
+/** Default sprue diameter (top / pour end), in mm. Same rationale as
+ *  CLEARANCE_MM — absolute mm matches how casters think. The sprue tapers
+ *  narrower toward the cavity via SPRUE_TOP_MULTIPLIER (top is 2× gate). */
+export const SPRUE_DIAMETER_MM = 10;
+
 /** Registration pin radius as a fraction of wall thickness. */
 export const PIN_RADIUS_RATIO = 0.3;
 /** Registration pin height as a fraction of wall thickness. */
 export const PIN_HEIGHT_RATIO = 0.6;
 /** Inset of registration pins from the bbox corners, as fraction of wall thickness. */
 export const PIN_INSET_RATIO = 0.7;
-/** Estimated wall thickness of the part (for gate sizing), as fraction of min bbox extent. */
-export const EST_WALL_THICKNESS_RATIO = 0.15;
-/** Sprue gate radius as fraction of estimated wall thickness (min). */
-export const SPRUE_GATE_TO_WALL = 0.75;
-/** Sprue top (pour end) radius multiplier vs. gate radius. */
+/** Sprue top (pour end) radius multiplier vs. gate radius. The gate end is
+ *  narrower than the top so material flows from wide to narrow (helps demolding
+ *  and reduces cavity-side stress). 2:1 is a compromise between pour ergonomics
+ *  (wider is better) and material waste (narrower is better). */
 export const SPRUE_TOP_MULTIPLIER = 2.0;
 /** Vent radius as fraction of sprue gate radius. */
 export const VENT_RADIUS_RATIO = 0.35;
