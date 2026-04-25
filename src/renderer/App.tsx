@@ -11,7 +11,7 @@ import { loadFile, parseFile } from './utils/fileLoader';
 import { createSampleModel } from './utils/sampleModel';
 import type { Axis, MoldBoxShape } from './types';
 import { colors, radii, spacing, fontSizes, focusVisibleCss } from './theme';
-import { WALL_THICKNESS_RATIO, CLEARANCE_RATIO } from './mold/constants';
+import { WALL_THICKNESS_RATIO, CLEARANCE_MM, SPRUE_DIAMETER_MM } from './mold/constants';
 import { translateStepError } from './mold/stepExportErrors';
 import { useTelemetry } from './services/useTelemetry';
 import { buildEvent } from './services/telemetryEvents';
@@ -77,7 +77,11 @@ export interface GeneratedParams {
   /** Cut-plane tilt around hinge axis, degrees. 0 = axis-aligned. */
   cutAngle: number;
   wallThicknessRatio: number;
-  clearanceRatio: number;
+  /** Clearance in absolute mm (roadmap #13 — was clearanceRatio before). */
+  clearanceMm: number;
+  /** Sprue top-diameter in absolute mm (roadmap #13). Drives sprueTopRadius
+   *  directly; gate radius is derived via SPRUE_TOP_MULTIPLIER (2:1 taper). */
+  sprueDiameterMm: number;
   /** Outer shell shape. Included in the staleness check — changing it must
    *  re-generate the mold, since it changes the CSG output geometry. */
   moldBoxShape: MoldBoxShape;
@@ -104,8 +108,10 @@ export interface AppState {
   cutAngle: number;
   /** Wall thickness as a fraction of max bbox extent. User-tunable; defaults to constants. */
   wallThicknessRatio: number;
-  /** Clearance between mating surfaces as a fraction of wall thickness. User-tunable. */
-  clearanceRatio: number;
+  /** Clearance between mating surfaces in absolute mm (roadmap #13). User-tunable. */
+  clearanceMm: number;
+  /** Sprue top-diameter in absolute mm (roadmap #13). User-tunable. */
+  sprueDiameterMm: number;
   /** Outer shell shape. Defaults to 'rect'. */
   moldBoxShape: MoldBoxShape;
   /**
@@ -163,7 +169,8 @@ const initialState: AppState = {
   planeOffset: 0.5,
   cutAngle: 0,
   wallThicknessRatio: WALL_THICKNESS_RATIO,
-  clearanceRatio: CLEARANCE_RATIO,
+  clearanceMm: CLEARANCE_MM,
+  sprueDiameterMm: SPRUE_DIAMETER_MM,
   moldBoxShape: 'rect',
   sprueOverride: { enabled: false, a: 0, b: 0 },
   autoDetecting: false,
@@ -349,7 +356,8 @@ export default function App() {
       offset: state.planeOffset,
       cutAngle: state.cutAngle,
       wallThicknessRatio: state.wallThicknessRatio,
-      clearanceRatio: state.clearanceRatio,
+      clearanceMm: state.clearanceMm,
+      sprueDiameterMm: state.sprueDiameterMm,
       moldBoxShape: state.moldBoxShape,
       sprueOverride: activeSprueOverride,
     };
@@ -362,7 +370,8 @@ export default function App() {
         params.offset,
         {
           wallThicknessRatio: params.wallThicknessRatio,
-          clearanceRatio: params.clearanceRatio,
+          clearanceMm: params.clearanceMm,
+          sprueDiameterMm: params.sprueDiameterMm,
           moldBoxShape: params.moldBoxShape,
           cutAngle: params.cutAngle,
           sprueOverride: params.sprueOverride ?? undefined,
@@ -414,7 +423,7 @@ export default function App() {
   }, [
     state.originalGeometry, state.boundingBox,
     state.axis, state.planeOffset, state.cutAngle,
-    state.wallThicknessRatio, state.clearanceRatio,
+    state.wallThicknessRatio, state.clearanceMm, state.sprueDiameterMm,
     state.sprueOverride,
     state.generating, generateMold, telemetry,
   ]);
@@ -650,6 +659,29 @@ export default function App() {
   // OR after, when the user has moved the slider/axis away from the params the
   // current mold was generated with (so the indicator marks where the *next*
   // cut will happen, not the old one).
+  // Sprue-override staleness: the stored value in generatedParams is either
+  // null (auto mode used) or {a,b}. Compare against the currently active
+  // override (null when toggle is off) — any mismatch = stale mold.
+  const currentActiveOverride = state.sprueOverride.enabled
+    ? { a: state.sprueOverride.a, b: state.sprueOverride.b }
+    : null;
+  const sprueOverrideChanged = state.generatedParams !== null && (() => {
+    const gen = state.generatedParams.sprueOverride;
+    if (gen === null && currentActiveOverride === null) return false;
+    if (gen === null || currentActiveOverride === null) return true;
+    return gen.a !== currentActiveOverride.a || gen.b !== currentActiveOverride.b;
+  })();
+
+  const paramsChanged = state.generatedParams !== null && (
+    state.generatedParams.axis !== state.axis ||
+    state.generatedParams.offset !== state.planeOffset ||
+    state.generatedParams.cutAngle !== state.cutAngle ||
+    state.generatedParams.wallThicknessRatio !== state.wallThicknessRatio ||
+    state.generatedParams.clearanceMm !== state.clearanceMm ||
+    state.generatedParams.sprueDiameterMm !== state.sprueDiameterMm ||
+    state.generatedParams.moldBoxShape !== state.moldBoxShape ||
+    sprueOverrideChanged
+  );
   const showPartingPlaneIndicator =
     !!state.originalGeometry && !!state.boundingBox && (!state.moldGenerated || paramsChanged);
 
@@ -911,14 +943,17 @@ export default function App() {
           }))}
           onWallThicknessChange={(wallThicknessRatio: number) =>
             setState(prev => ({ ...prev, wallThicknessRatio }))}
-          onClearanceChange={(clearanceRatio: number) =>
-            setState(prev => ({ ...prev, clearanceRatio }))}
+          onClearanceChange={(clearanceMm: number) =>
+            setState(prev => ({ ...prev, clearanceMm }))}
+          onSprueDiameterChange={(sprueDiameterMm: number) =>
+            setState(prev => ({ ...prev, sprueDiameterMm }))}
           onMoldBoxShapeChange={(moldBoxShape: MoldBoxShape) =>
             setState(prev => ({ ...prev, moldBoxShape }))}
           onResetDimensions={() => setState(prev => ({
             ...prev,
             wallThicknessRatio: WALL_THICKNESS_RATIO,
-            clearanceRatio: CLEARANCE_RATIO,
+            clearanceMm: CLEARANCE_MM,
+            sprueDiameterMm: SPRUE_DIAMETER_MM,
             moldBoxShape: 'rect',
           }))}
           onGenerate={handleGenerate}

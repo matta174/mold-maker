@@ -1,4 +1,4 @@
-<svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mold Maker — two-part silicone mold generator">
+<svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mold Maker — two-part mold generator for 3D printing">
   <title>Mold Maker</title>
   <desc>Social preview: mold-maker logo on the left, wordmark and tagline on the right.</desc>
   <rect width="1280" height="640" fill="#fafaf9"/>
@@ -14,7 +14,7 @@
   </g>
   <g transform="translate(560 260)" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
     <text x="0" y="0" font-size="96" font-weight="500" fill="#1f2937" letter-spacing="-2">mold-maker</text>
-    <text x="0" y="52" font-size="28" fill="#64748b">Two-part silicone mold generator for 3D printing</text>
+    <text x="0" y="52" font-size="28" fill="#64748b">Two-part mold generator for 3D printing</text>
     <text x="0" y="100" font-size="22" fill="#94a3b8" font-family="ui-monospace, 'SF Mono', Menlo, monospace">matta174.github.io/mold-maker</text>
   </g>
 </svg>
